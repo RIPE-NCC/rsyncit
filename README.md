@@ -1,2 +1,3 @@
 # rsyncit
-RRDP -> rsync sync tool
+
+RRDP -> rsync simple tool
