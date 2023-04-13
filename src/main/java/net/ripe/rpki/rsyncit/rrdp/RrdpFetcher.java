@@ -1,14 +1,13 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
-import com.google.common.base.Strings;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import net.ripe.rpki.rsyncit.config.Config;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpRequest;
+import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -45,7 +44,6 @@ public class RrdpFetcher {
 
     private String lastSnapshotUrl;
 
-
     public RrdpFetcher(Config config, WebClient httpClient) {
         this.config = config;
         this.httpClient = httpClient;
@@ -62,7 +60,7 @@ public class RrdpFetcher {
     private byte[] loadSnapshot(String snapshotUrl, String desiredSnapshotHash) throws SnapshotStructureException {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
-        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.getTotalRequestTimeout());
+        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.getRequestTimeout());
 
         final String realSnapshotHash = Sha256.asString(snapshotBytes);
         if (!realSnapshotHash.equalsIgnoreCase(desiredSnapshotHash)) {
@@ -77,7 +75,7 @@ public class RrdpFetcher {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
-            final byte[] notificationBytes = blockForHttpGetRequest(config.getRrdpUrl(), config.getTotalRequestTimeout());
+            final byte[] notificationBytes = blockForHttpGetRequest(config.getRrdpUrl(), config.getRequestTimeout());
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
             final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
@@ -182,7 +180,7 @@ public class RrdpFetcher {
                     // off before decoding. See also:
                     // https://www.w3.org/TR/2004/PER-xmlschema-2-20040318/datatypes.html#base64Binary
                     var decoded = decoder.decode(content.trim());
-                    return ImmutablePair.of(objectUri, new RpkiObject(decoded));
+                    return ImmutablePair.of(objectUri, new RpkiObject(objectUri, decoded));
                 } catch (RuntimeException e) {
                     log.error("cannot decode object data for URI {}\n{}", objectUri, content);
                     throw e;

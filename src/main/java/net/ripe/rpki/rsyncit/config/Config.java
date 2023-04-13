@@ -9,5 +9,5 @@ public class Config {
     String rrdpUrl;
     String rsyncPath;
     String cron;
-    Duration totalRequestTimeout;
+    Duration requestTimeout;
 }
