@@ -140,26 +140,22 @@ public class RsyncWriter {
     }
 
     private void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
-        // TODO Make it a config parameter
-        var targetDirectoryRetentionPeriodMs = 60 * 60 * 1000;
-        var targetDirectoryRetentionCopiesCount = 8;
-
-        long cutoff = now.toEpochMilli() - targetDirectoryRetentionPeriodMs;
+        long cutoff = now.toEpochMilli() - config.getTargetDirectoryRetentionPeriodMs();
 
         try (
             Stream<Path> oldDirectories = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
-                .skip(targetDirectoryRetentionCopiesCount)
+                .skip(config.getTargetDirectoryRetentionCopiesCount())
                 .filter((directory) -> getLastModifiedTime(directory).toMillis() < cutoff)
         ) {
             fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
-                log.info("removing old publication directory {}", directory);
+                log.info("Removing old publication directory {}", directory);
                 try {
                     FileUtils.deleteDirectory(directory.toFile());
                 } catch (IOException e) {
-                    log.warn("removing old publication directory {} failed", directory, e);
+                    log.warn("Removing old publication directory {} failed", directory, e);
                 }
             })).join();
         }

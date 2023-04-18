@@ -10,4 +10,6 @@ public class Config {
     String rsyncPath;
     String cron;
     Duration requestTimeout;
+    long targetDirectoryRetentionPeriodMs;
+    int targetDirectoryRetentionCopiesCount;
 }
