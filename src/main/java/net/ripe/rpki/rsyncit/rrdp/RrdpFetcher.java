@@ -4,10 +4,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import net.ripe.rpki.rsyncit.config.Config;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.http.HttpRequest;
-import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -24,9 +21,11 @@ import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
-import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -41,12 +40,14 @@ public class RrdpFetcher {
 
     private final Config config;
     private final WebClient httpClient;
+    private final State state;
 
     private String lastSnapshotUrl;
 
-    public RrdpFetcher(Config config, WebClient httpClient) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state) {
         this.config = config;
         this.httpClient = httpClient;
+        this.state = state;
         log.info("RrdpFetcher for {}", config.getRrdpUrl());
     }
 
@@ -71,7 +72,15 @@ public class RrdpFetcher {
         return snapshotBytes;
     }
 
-    public Map<String, RpkiObject> fetchObjects() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
+    public List<RpkiObject> fetchObjects() {
+        try {
+            return fetchObjectsEx();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public List<RpkiObject> fetchObjectsEx() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
@@ -164,6 +173,7 @@ public class RrdpFetcher {
         var queryPublish = XPathFactory.newDefaultInstance().newXPath().compile("/snapshot/publish");
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
+        var now = Instant.now();
         var collisionCount = new AtomicInteger();
 
         var decoder = Base64.getDecoder();
@@ -180,30 +190,35 @@ public class RrdpFetcher {
                     // off before decoding. See also:
                     // https://www.w3.org/TR/2004/PER-xmlschema-2-20040318/datatypes.html#base64Binary
                     var decoded = decoder.decode(content.trim());
-                    return ImmutablePair.of(objectUri, new RpkiObject(objectUri, decoded));
+                    var hash = Sha256.asString(decoded);
+                    final Instant createAt = state.getOrUpdateCreatedAt(hash, now);
+                    return new RpkiObject(URI.create(objectUri), decoded, createAt);
                 } catch (RuntimeException e) {
-                    log.error("cannot decode object data for URI {}\n{}", objectUri, content);
+                    log.error("Cannot decode object data for URI {}\n{}", objectUri, content);
                     throw e;
                 }
             })
             // group by url to detect duplicate urls: keeps the first element, will cause a diff between
             // the sources being monitored.
-            .collect(Collectors.groupingBy(Pair::getLeft))
+            .collect(Collectors.groupingBy(RpkiObject::getUrl))
             // invariant: every group has at least 1 item
             .entrySet().stream()
             .map(item -> {
                 if (item.getValue().size() > 1) {
-                    log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), item.getValue().stream().map(coll -> Sha256.asString(coll.getRight().getBytes())).collect(Collectors.joining(", ")));
+                    var collect = item.getValue().stream().map(coll ->
+                            Sha256.asString(coll.getBytes())).
+                            collect(Collectors.joining(", "));
+                    log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), collect);
                     collisionCount.addAndGet(item.getValue().size() - 1);
                     return item.getValue().get(0);
                 }
                 return item.getValue().get(0);
             })
-            .collect(Collectors.toMap(Pair::getLeft, Pair::getRight));
+            .collect(Collectors.toList());
 
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    record ProcessPublishElementResult(Map<String, RpkiObject> objects, int collisionCount) {};
+    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {};
 }
 
