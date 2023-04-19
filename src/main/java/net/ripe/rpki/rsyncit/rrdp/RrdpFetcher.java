@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import net.ripe.rpki.rsyncit.config.Config;
+import net.ripe.rpki.rsyncit.util.Time;
+import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -101,7 +103,10 @@ public class RrdpFetcher {
                 throw new SnapshotNotModifiedException(snapshotUrl);
             }
 
+            long begin = System.currentTimeMillis();
             final byte[] snapshotContent = loadSnapshot(snapshotUrl, desiredSnapshotHash);
+            long end = System.currentTimeMillis();
+            log.info("Downloaded snapshot in {}ms", (end - begin));
 
             final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshotContent));
             var doc = snapshotXmlDoc.getDocumentElement();
@@ -178,7 +183,7 @@ public class RrdpFetcher {
 
         var decoder = Base64.getDecoder();
 
-        var objects = IntStream
+        var t = Time.timed(() -> IntStream
             .range(0, publishedObjects.getLength())
             .mapToObj(publishedObjects::item)
             .map(item -> {
@@ -214,8 +219,10 @@ public class RrdpFetcher {
                 }
                 return item.getValue().get(0);
             })
-            .collect(Collectors.toList());
+            .collect(Collectors.toList()));
 
+        var objects = t.getResult();
+        log.info("Constructed {} objects in {}ms", objects.size(), t.getTime());
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
