@@ -13,20 +13,20 @@ import java.util.Properties;
 @SpringBootApplication
 public class RsyncitApplication {
 
-	public static void main(String[] args) {
-		SpringApplication application = new SpringApplication(RsyncitApplication.class);
-		Properties properties = new Properties();
-		properties.put("spring.codec.max-in-memory-size", "1GB");
-		application.setDefaultProperties(properties);
-		application.run(args);
-	}
+    public static void main(String[] args) {
+        SpringApplication application = new SpringApplication(RsyncitApplication.class);
+        Properties properties = new Properties();
+        properties.put("spring.codec.max-in-memory-size", "1GB");
+        application.setDefaultProperties(properties);
+        application.run(args);
+    }
 
-	@Bean
-	public WebClientBuilderFactory webclientConfigurer(WebClient.Builder baseBuilder, AppConfig appConfig) {
-		// Explicit event loop is required for custom DnsNameResolverBuilder
-		NioEventLoopGroup group = new NioEventLoopGroup(1);
+    @Bean
+    public WebClientBuilderFactory webclientConfigurer(WebClient.Builder baseBuilder, AppConfig appConfig) {
+        // Explicit event loop is required for custom DnsNameResolverBuilder
+        NioEventLoopGroup group = new NioEventLoopGroup(1);
 
-		return new WebClientBuilderFactory(group, baseBuilder, "rpki-monitor %s".formatted(appConfig.getInfo().gitCommitId()));
-	}
+        return new WebClientBuilderFactory(group, baseBuilder, "rpki-monitor %s".formatted(appConfig.getInfo().gitCommitId()));
+    }
 
 }
