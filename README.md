@@ -14,7 +14,12 @@ There are other parameters in `AppConfig` class, but they have reasonable defaul
 # Running as a Docker container
 * Building image
     
-    `docker build --build-arg JAR_FILE=build/libs/rsyncit-0.0.1-SNAPSHOT.jar  -t rsyncit/0.0.1 .`
+    ```
+    docker build \ 
+        --build-arg JAR_FILE=build/libs/rsyncit-0.0.1-SNAPSHOT.jar \
+        --build-arg RSYNCD_CONF_FILE=docker/rsyncd.conf.docker \
+        -t rsyncit/0.0.1 .
+    ```
     
 * Running example:
     
