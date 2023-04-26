@@ -11,3 +11,11 @@ These are working values for running sync job every 10 minutes
 ```
 There are other parameters in `AppConfig` class, but they have reasonable defaults and not necessary for testing.
     
+# Running as a Docker container
+* Building image
+    
+    `docker build --build-arg JAR_FILE=build/libs/rsyncit-0.0.1-SNAPSHOT.jar  -t rsyncit/0.0.1 .`
+    
+* Running example:
+    
+    `docker run -p 8080:8080 -p 8730:873 --env RRDPURL="https://rrdp.ripe.net/notification.xml" rsyncit/0.0.`
