@@ -1,7 +1,7 @@
 #!/bin/sh
 
 echo "Running rsync..."
-rsync --config=/etc/rsyncd.conf --daemon &
+rsync --config=/conf/rsyncd.conf --daemon &
 echo "Rsync started"
 
 echo "Running rsyncit..."
@@ -15,7 +15,4 @@ java -Djava.net.preferIPv4Stack=true \
     -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
     -DrsyncPath=/data \
     -jar /rsyncit.jar
-
-
-
 

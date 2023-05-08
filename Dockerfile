@@ -1,13 +1,17 @@
 FROM eclipse-temurin:17-jdk-alpine
+
 VOLUME /data
+VOLUME /conf
+
 RUN apk update && apk add --no-cache rsync
+
 ARG JAR_FILE
-ARG RSYNCD_CONF_FILE
 COPY ${JAR_FILE} rsyncit.jar
+
 COPY docker/run.sh run.sh
+
 RUN chmod +x /run.sh
 RUN mkdir -p /var/log/rsyncd/
-COPY ${RSYNCD_CONF_FILE} /etc/rsyncd.conf
 
 EXPOSE 8080
 EXPOSE 873
