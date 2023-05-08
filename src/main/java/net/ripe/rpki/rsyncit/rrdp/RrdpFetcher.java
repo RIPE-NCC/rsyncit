@@ -74,7 +74,7 @@ public class RrdpFetcher {
         return snapshotBytes;
     }
 
-    public List<RpkiObject> fetchObjects() {
+    public FetchResult fetchObjects() {
         try {
             return fetchObjectsEx();
         } catch (Exception e) {
@@ -82,7 +82,7 @@ public class RrdpFetcher {
         }
     }
 
-    public List<RpkiObject> fetchObjectsEx() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
+    public FetchResult fetchObjectsEx() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
@@ -90,6 +90,7 @@ public class RrdpFetcher {
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
             final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
+            final String notificationSessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
 
             final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
 //            final String snapshotUrl = config.overrideHostname(snapshotTag.getAttributes().getNamedItem("uri").getNodeValue());
@@ -119,7 +120,7 @@ public class RrdpFetcher {
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
 
-            return processPublishElementResult.objects;
+            return new FetchResult(processPublishElementResult.objects, notificationSessionId, notificationSerial);
         } catch (SnapshotStructureException e) {
 //            metrics.failure();
             throw e;
@@ -227,5 +228,7 @@ public class RrdpFetcher {
     }
 
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {};
+
+    public record FetchResult(List<RpkiObject> objects, String sessionId, Integer serial) {};
 }
 
