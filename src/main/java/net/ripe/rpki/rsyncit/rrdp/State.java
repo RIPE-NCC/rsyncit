@@ -63,7 +63,7 @@ public class State {
             createdAt = Instant.now();
         }
 
-        public void synced() {
+        public void markInSync() {
             inSync = true;
         }
     }

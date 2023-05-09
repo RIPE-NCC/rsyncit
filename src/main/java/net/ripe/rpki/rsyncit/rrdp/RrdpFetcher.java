@@ -1,11 +1,14 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-
 import net.ripe.rpki.rsyncit.config.Config;
+import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
-import org.apache.commons.lang3.tuple.Pair;
+import net.ripe.rpki.rsyncit.util.XML;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -27,14 +30,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
-import net.ripe.rpki.rsyncit.util.Sha256;
-import net.ripe.rpki.rsyncit.util.XML;
 
 @Slf4j
 @Getter
@@ -46,10 +47,13 @@ public class RrdpFetcher {
 
     private String lastSnapshotUrl;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state) {
+    private final RRDPFetcherMetrics metrics;
+
+    public RrdpFetcher(Config config, WebClient httpClient, State state, MeterRegistry meterRegistry) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
+        this.metrics = new RRDPFetcherMetrics(meterRegistry);
         log.info("RrdpFetcher for {}", config.getRrdpUrl());
     }
 
@@ -82,7 +86,7 @@ public class RrdpFetcher {
         }
     }
 
-    public FetchResult fetchObjectsEx() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
+    public FetchResult fetchObjectsEx() throws SnapshotStructureException, RepoUpdateAbortedException {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
@@ -93,15 +97,13 @@ public class RrdpFetcher {
             final String notificationSessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
 
             final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
-//            final String snapshotUrl = config.overrideHostname(snapshotTag.getAttributes().getNamedItem("uri").getNodeValue());
             final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
             final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
-
-//            verifyNotNull(snapshotUrl);
+            
             if (snapshotUrl.equals(lastSnapshotUrl)) {
                 log.info("not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
-//                metrics.success(notificationSerial, metrics.collisionCount());
-                throw new SnapshotNotModifiedException(snapshotUrl);
+                metrics.success(notificationSerial);
+                return new FetchResult(Collections.emptyList(), notificationSessionId, notificationSerial);
             }
 
             long begin = System.currentTimeMillis();
@@ -116,22 +118,23 @@ public class RrdpFetcher {
 
             var processPublishElementResult = processPublishElements(doc);
 
-//            metrics.success(notificationSerial, processPublishElementResult.collisionCount);
+            metrics.success(notificationSerial);
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
 
             return new FetchResult(processPublishElementResult.objects, notificationSessionId, notificationSerial);
         } catch (SnapshotStructureException e) {
-//            metrics.failure();
+            metrics.failure();
             throw e;
-        } catch (ParserConfigurationException | XPathExpressionException | SAXException | IOException | NumberFormatException e) {
+        } catch (ParserConfigurationException | XPathExpressionException | SAXException | IOException |
+                 NumberFormatException e) {
             // recall: IOException, ConnectException are subtypes of IOException
-//            metrics.failure();
+            metrics.failure();
             throw new FetcherException(e);
         } catch (IllegalStateException e) {
             if (e.getMessage().contains("Timeout")) {
                 log.info("Timeout while loading RRDP repo: url={}", config.getRrdpUrl());
-//                metrics.timeout();
+                metrics.timeout();
                 throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
             } else {
                 throw e;
@@ -142,17 +145,17 @@ public class RrdpFetcher {
             log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.", maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
             if (e.getStatusCode().is2xxSuccessful()) {
                 // Assume it's a timeout
-//                metrics.timeout();
+                metrics.timeout();
                 throw new RepoUpdateAbortedException(Optional.ofNullable(e.getRequest()).map(HttpRequest::getURI).orElse(null), e);
             } else {
-//                metrics.failure();
+                metrics.failure();
                 throw e;
             }
         } catch (WebClientRequestException e) {
             // TODO: Exception handling could be a lot nicer. However we are mixing reactive and synchronous code,
             //  and a nice solution probably requires major changes.
             log.error("Web client request exception, only known cause is a timeout.", e);
-//            metrics.timeout();
+            metrics.timeout();
             throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
         }
     }
@@ -213,7 +216,7 @@ public class RrdpFetcher {
                 if (item.getValue().size() > 1) {
                     var collect = item.getValue().stream().map(coll ->
                             Sha256.asString(coll.getBytes())).
-                            collect(Collectors.joining(", "));
+                        collect(Collectors.joining(", "));
                     log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), collect);
                     collisionCount.addAndGet(item.getValue().size() - 1);
                     return item.getValue().get(0);
@@ -227,8 +230,45 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {};
+    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {
+    }
 
-    public record FetchResult(List<RpkiObject> objects, String sessionId, Integer serial) {};
+    public record FetchResult(List<RpkiObject> objects, String sessionId, Integer serial) {
+    }
+
+    public static final class RRDPFetcherMetrics {
+        final AtomicInteger rrdpSerial = new AtomicInteger();
+
+        final Counter successfulUpdates;
+        private final Counter failedUpdates;
+        private final Counter timeoutUpdates;
+
+        RRDPFetcherMetrics(MeterRegistry meterRegistry) {
+            successfulUpdates = buildCounter("success", meterRegistry);
+            failedUpdates = buildCounter("failed", meterRegistry);
+            timeoutUpdates = buildCounter("timeout", meterRegistry);
+
+            Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
+                .description("Serial of the RRDP notification.xml at the given URL")
+                .register(meterRegistry);
+        }
+
+        public void success(int serial) {
+            this.successfulUpdates.increment();
+            this.rrdpSerial.set(serial);
+        }
+
+        public void failure() { this.failedUpdates.increment(); }
+
+        public void timeout() { this.timeoutUpdates.increment(); }
+
+        private static Counter buildCounter(String statusTag, MeterRegistry registry) {
+            return Counter.builder("rsyncit.fetcher.updated")
+                .description("Number of fetches")
+                .tag("status", statusTag)
+                .register(registry);
+        }
+
+    }
 }
 
