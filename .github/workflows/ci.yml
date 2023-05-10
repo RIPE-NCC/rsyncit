@@ -58,4 +58,4 @@ jobs:
             JAR_FILE=build/libs/rsyncit-0.0.1-SNAPSHOT.jar            
 
       - name: Image digest
-        run: echo ${{ steps.docker_build_publication_server.outputs.digest }}
+        run: echo ${{ steps.docker_build_rsyncit.outputs.digest }}
