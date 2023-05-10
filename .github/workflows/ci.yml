@@ -1,0 +1,21 @@
+name: CI workflow
+on: [push, pull_request]
+
+jobs:
+  gradle-build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v3
+
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 17
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+
+    - name: Compile and Test
+      run: ./gradlew build
