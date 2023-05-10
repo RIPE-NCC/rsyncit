@@ -20,6 +20,12 @@ jobs:
     - name: Compile and Test
       run: ./gradlew build
 
+    - name: Upload JAR
+      uses: actions/upload-artifact@v3
+      with:
+          name: rsyncit-jar
+          path: build/libs/rsyncit-0.0.1-SNAPSHOT.jar
+
 
   docker:
     runs-on: ubuntu-latest
