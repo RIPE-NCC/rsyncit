@@ -38,28 +38,31 @@ public class SyncService {
     public void sync() {
         var config = appConfig.getConfig();
         var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state, meterRegistry);
+
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
-        log.info("Fetched {} objects in {}ms", fetchResult.objects().size(), t.getTime());
-
-        final State.RrdpState currentRrdpState = state.getRrdpState();
-        if (currentRrdpState != null &&
-            currentRrdpState.getSessionId().equals(fetchResult.sessionId()) &&
-            currentRrdpState.getSerial().equals(fetchResult.serial())) {
+        if (fetchResult instanceof RrdpFetcher.NoUpdates noUpdates) {
             log.info("Session id {} and serial {} have not changed since the last check, nothing to update",
-                fetchResult.sessionId(), fetchResult.serial());
-        } else {
-            state.setRrdpState(new State.RrdpState(fetchResult.sessionId(), fetchResult.serial()));
-            log.info("Updated RRDP state to session_id {} and serial {}", fetchResult.sessionId(), fetchResult.serial());
+                noUpdates.sessionId(), noUpdates.serial());
+        } else if (fetchResult instanceof RrdpFetcher.SuccessfulFetch success) {
+            log.info("Fetched {} objects in {}ms", success.objects().size(), t.getTime());
+            state.setRrdpState(new State.RrdpState(success.sessionId(), success.serial()));
+            log.info("Updated RRDP state to session_id {} and serial {}", success.sessionId(), success.serial());
 
             var rsyncWriter = new RsyncWriter(config);
-            var r = Time.timed(() -> rsyncWriter.writeObjects(fetchResult.objects()));
+            var r = Time.timed(() -> rsyncWriter.writeObjects(success.objects()));
             log.info("Wrote objects to {} in {}ms", r.getResult(), r.getTime());
 
             state.getRrdpState().markInSync();
 
             // Remove objects that were in old snapshots and didn't appear for a while
             state.removeOldObject(Instant.now().minus(1, ChronoUnit.HOURS));
+        } else if (fetchResult instanceof RrdpFetcher.FailedFetch failed) {
+            log.error("Failed to fetch RRDP:", failed.exception());
+            state.setRrdpState(new State.RrdpState(failed.exception().getMessage()));
+        } else {
+            // Should never happen?
+            log.error("Error, unknown fetch status");
         }
     }
 

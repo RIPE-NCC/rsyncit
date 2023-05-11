@@ -1,5 +1,6 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
@@ -52,9 +53,13 @@ public class State {
 
     @Getter
     public static class RrdpState {
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         private final String sessionId;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         private final Integer serial;
         private final Instant createdAt;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private String failure;
         private boolean inSync;
 
         public RrdpState(String sessionId, Integer serial) {
@@ -63,8 +68,19 @@ public class State {
             createdAt = Instant.now();
         }
 
+        public RrdpState(String failure) {
+            this.failure = failure;
+            this.sessionId = null;
+            this.serial = null;
+            createdAt = Instant.now();
+        }
+
         public void markInSync() {
             inSync = true;
+        }
+
+        public void failed(String failure) {
+            this.failure = failure;
         }
     }
 }

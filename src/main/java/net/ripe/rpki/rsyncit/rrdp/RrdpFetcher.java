@@ -82,7 +82,7 @@ public class RrdpFetcher {
         try {
             return fetchObjectsEx();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            return new FailedFetch(e);
         }
     }
 
@@ -101,9 +101,9 @@ public class RrdpFetcher {
             final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
             
             if (snapshotUrl.equals(lastSnapshotUrl)) {
-                log.info("not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
+                log.info("Not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
                 metrics.success(notificationSerial);
-                return new FetchResult(Collections.emptyList(), notificationSessionId, notificationSerial);
+                return new NoUpdates(notificationSessionId, notificationSerial);
             }
 
             long begin = System.currentTimeMillis();
@@ -122,7 +122,7 @@ public class RrdpFetcher {
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
 
-            return new FetchResult(processPublishElementResult.objects, notificationSessionId, notificationSerial);
+            return new SuccessfulFetch(processPublishElementResult.objects, notificationSessionId, notificationSerial);
         } catch (SnapshotStructureException e) {
             metrics.failure();
             throw e;
@@ -230,11 +230,13 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {
-    }
+    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
 
-    public record FetchResult(List<RpkiObject> objects, String sessionId, Integer serial) {
-    }
+    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch {}
+
+    public record SuccessfulFetch(List<RpkiObject> objects, String sessionId, Integer serial) implements FetchResult {}
+    public record NoUpdates(String sessionId, Integer serial) implements FetchResult {}
+    public record FailedFetch(Exception exception) implements FetchResult {}
 
     public static final class RRDPFetcherMetrics {
         final AtomicInteger rrdpSerial = new AtomicInteger();
