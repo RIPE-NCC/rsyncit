@@ -50,7 +50,7 @@ public class RrdpFetcher {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
-        log.info("RrdpFetcher for {}", config.getRrdpUrl());
+        log.info("RrdpFetcher instance for {}", config.getRrdpUrl());
     }
 
     private byte[] blockForHttpGetRequest(String uri, Duration timeout) {
