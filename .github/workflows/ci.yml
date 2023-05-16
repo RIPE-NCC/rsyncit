@@ -24,7 +24,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
           name: rsyncit-jar
-          path: build/libs/rsyncit-0.0.1-SNAPSHOT.jar
+          path: build/libs/rsyncit-*.jar
 
 
   docker:
@@ -62,7 +62,7 @@ jobs:
           tags: ghcr.io/ripe-ncc/rsyncit:latest
           labels: "org.label-schema.vcs-ref=${{ github.sha }}"
           build-args: |
-            JAR_FILE=rsyncit-0.0.1-SNAPSHOT.jar            
+            JAR_FILE=rsyncit.jar            
 
       - name: Image digest
         run: echo ${{ steps.docker_build_rsyncit.outputs.digest }}
