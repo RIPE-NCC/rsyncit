@@ -47,3 +47,8 @@ bootRun {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// Do not build *-plain.jar
+jar {
+    enabled = false
+}
