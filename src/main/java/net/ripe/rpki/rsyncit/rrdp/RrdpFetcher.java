@@ -54,7 +54,7 @@ public class RrdpFetcher {
         this.httpClient = httpClient;
         this.state = state;
         this.metrics = new RRDPFetcherMetrics(meterRegistry);
-        log.info("RrdpFetcher for {}", config.getRrdpUrl());
+        log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
     private byte[] blockForHttpGetRequest(String uri, Duration timeout) {
@@ -67,7 +67,7 @@ public class RrdpFetcher {
     private byte[] loadSnapshot(String snapshotUrl, String desiredSnapshotHash) throws SnapshotStructureException {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
-        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.getRequestTimeout());
+        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
 
         final String realSnapshotHash = Sha256.asString(snapshotBytes);
         if (!realSnapshotHash.equalsIgnoreCase(desiredSnapshotHash)) {
@@ -90,7 +90,7 @@ public class RrdpFetcher {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
-            final byte[] notificationBytes = blockForHttpGetRequest(config.getRrdpUrl(), config.getRequestTimeout());
+            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout());
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
             final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
@@ -133,9 +133,9 @@ public class RrdpFetcher {
             throw new FetcherException(e);
         } catch (IllegalStateException e) {
             if (e.getMessage().contains("Timeout")) {
-                log.info("Timeout while loading RRDP repo: url={}", config.getRrdpUrl());
+                log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
                 metrics.timeout();
-                throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
+                throw new RepoUpdateAbortedException(config.rrdpUrl(), e);
             } else {
                 throw e;
             }
@@ -156,7 +156,7 @@ public class RrdpFetcher {
             //  and a nice solution probably requires major changes.
             log.error("Web client request exception, only known cause is a timeout.", e);
             metrics.timeout();
-            throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
+            throw new RepoUpdateAbortedException(config.rrdpUrl(), e);
         }
     }
 
@@ -209,13 +209,13 @@ public class RrdpFetcher {
             })
             // group by url to detect duplicate urls: keeps the first element, will cause a diff between
             // the sources being monitored.
-            .collect(Collectors.groupingBy(RpkiObject::getUrl))
+            .collect(Collectors.groupingBy(RpkiObject::url))
             // invariant: every group has at least 1 item
             .entrySet().stream()
             .map(item -> {
                 if (item.getValue().size() > 1) {
                     var collect = item.getValue().stream().map(coll ->
-                            Sha256.asString(coll.getBytes())).
+                            Sha256.asString(coll.bytes())).
                         collect(Collectors.joining(", "));
                     log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), collect);
                     collisionCount.addAndGet(item.getValue().size() - 1);

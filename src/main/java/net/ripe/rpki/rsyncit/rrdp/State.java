@@ -78,9 +78,5 @@ public class State {
         public void markInSync() {
             inSync = true;
         }
-
-        public void failed(String failure) {
-            this.failure = failure;
-        }
     }
 }
