@@ -30,7 +30,6 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,13 +46,10 @@ public class RrdpFetcher {
 
     private String lastSnapshotUrl;
 
-    private final RRDPFetcherMetrics metrics;
-
     public RrdpFetcher(Config config, WebClient httpClient, State state, MeterRegistry meterRegistry) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
-        this.metrics = new RRDPFetcherMetrics(meterRegistry);
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
@@ -82,11 +78,12 @@ public class RrdpFetcher {
         try {
             return fetchObjectsEx();
         } catch (Exception e) {
+            // it still may throw something unknown
             return new FailedFetch(e);
         }
     }
 
-    public FetchResult fetchObjectsEx() throws SnapshotStructureException, RepoUpdateAbortedException {
+    public FetchResult fetchObjectsEx() {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
@@ -99,10 +96,9 @@ public class RrdpFetcher {
             final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
             final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
             final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
-            
+
             if (snapshotUrl.equals(lastSnapshotUrl)) {
                 log.info("Not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
-                metrics.success(notificationSerial);
                 return new NoUpdates(notificationSessionId, notificationSerial);
             }
 
@@ -118,45 +114,33 @@ public class RrdpFetcher {
 
             var processPublishElementResult = processPublishElements(doc);
 
-            metrics.success(notificationSerial);
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
 
             return new SuccessfulFetch(processPublishElementResult.objects, notificationSessionId, notificationSerial);
-        } catch (SnapshotStructureException e) {
-            metrics.failure();
-            throw e;
-        } catch (ParserConfigurationException | XPathExpressionException | SAXException | IOException |
-                 NumberFormatException e) {
-            // recall: IOException, ConnectException are subtypes of IOException
-            metrics.failure();
-            throw new FetcherException(e);
+        } catch (SnapshotStructureException | ParserConfigurationException | XPathExpressionException | SAXException |
+                 IOException | NumberFormatException e) {
+            return new FailedFetch(e);
         } catch (IllegalStateException e) {
             if (e.getMessage().contains("Timeout")) {
                 log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
-                metrics.timeout();
-                throw new RepoUpdateAbortedException(config.rrdpUrl(), e);
-            } else {
-                throw e;
+                return new Timeout();
             }
+            return new FailedFetch(e);
         } catch (WebClientResponseException e) {
             var maybeRequest = Optional.ofNullable(e.getRequest());
             // Can be either a HTTP non-2xx or a timeout
             log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.", maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
             if (e.getStatusCode().is2xxSuccessful()) {
                 // Assume it's a timeout
-                metrics.timeout();
-                throw new RepoUpdateAbortedException(Optional.ofNullable(e.getRequest()).map(HttpRequest::getURI).orElse(null), e);
-            } else {
-                metrics.failure();
-                throw e;
+                return new Timeout();
             }
+            return new FailedFetch(e);
         } catch (WebClientRequestException e) {
             // TODO: Exception handling could be a lot nicer. However we are mixing reactive and synchronous code,
             //  and a nice solution probably requires major changes.
             log.error("Web client request exception, only known cause is a timeout.", e);
-            metrics.timeout();
-            throw new RepoUpdateAbortedException(config.rrdpUrl(), e);
+            return new Timeout();
         }
     }
 
@@ -232,45 +216,12 @@ public class RrdpFetcher {
 
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
 
-    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch {}
+    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch, Timeout {}
 
     public record SuccessfulFetch(List<RpkiObject> objects, String sessionId, Integer serial) implements FetchResult {}
     public record NoUpdates(String sessionId, Integer serial) implements FetchResult {}
     public record FailedFetch(Exception exception) implements FetchResult {}
+    public record Timeout() implements FetchResult {}
 
-    public static final class RRDPFetcherMetrics {
-        final AtomicInteger rrdpSerial = new AtomicInteger();
-
-        final Counter successfulUpdates;
-        private final Counter failedUpdates;
-        private final Counter timeoutUpdates;
-
-        RRDPFetcherMetrics(MeterRegistry meterRegistry) {
-            successfulUpdates = buildCounter("success", meterRegistry);
-            failedUpdates = buildCounter("failed", meterRegistry);
-            timeoutUpdates = buildCounter("timeout", meterRegistry);
-
-            Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
-                .description("Serial of the RRDP notification.xml at the given URL")
-                .register(meterRegistry);
-        }
-
-        public void success(int serial) {
-            this.successfulUpdates.increment();
-            this.rrdpSerial.set(serial);
-        }
-
-        public void failure() { this.failedUpdates.increment(); }
-
-        public void timeout() { this.timeoutUpdates.increment(); }
-
-        private static Counter buildCounter(String statusTag, MeterRegistry registry) {
-            return Counter.builder("rsyncit.fetcher.updated")
-                .description("Number of fetches")
-                .tag("status", statusTag)
-                .register(registry);
-        }
-
-    }
 }
 
