@@ -29,4 +29,4 @@ There are other parameters in `AppConfig` class, but they have reasonable defaul
         --env RRDPURL="https://rrdp.ripe.net/notification.xml" \
         rsyncit/0.0.`
     ```
-  
+ Setting `--env NO_RSYNCD=true` will not run `rsyncd` inside of the container so only `rsyncit` Java process will be started. 
