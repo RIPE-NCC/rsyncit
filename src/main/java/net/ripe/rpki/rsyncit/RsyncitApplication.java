@@ -17,6 +17,7 @@ public class RsyncitApplication {
         SpringApplication application = new SpringApplication(RsyncitApplication.class);
         Properties properties = new Properties();
         properties.put("spring.codec.max-in-memory-size", "1GB");
+        properties.put("management.endpoints.web.exposure.include", "info,prometheus,health");
         application.setDefaultProperties(properties);
         application.run(args);
     }

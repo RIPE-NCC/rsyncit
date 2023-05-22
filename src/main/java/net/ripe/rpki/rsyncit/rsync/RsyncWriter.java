@@ -44,9 +44,9 @@ public class RsyncWriter {
     public Path writeObjects(List<RpkiObject> objects) {
         try {
             final Instant now = Instant.now();
-            var baseDirectory = Paths.get(config.getRsyncPath());
+            var baseDirectory = Paths.get(config.rsyncPath());
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
-            atomicallyReplacePublishedSymlink(Paths.get(config.getRsyncPath()), targetDirectory);
+            atomicallyReplacePublishedSymlink(Paths.get(config.rsyncPath()), targetDirectory);
             cleanupOldTargetDirectories(now, baseDirectory);
             return targetDirectory;
         } catch (Exception e) {
@@ -58,12 +58,12 @@ public class RsyncWriter {
         // Since we don't know anything about URLs of the objects
         // they are grouped by the host name of the URL
         final Map<String, List<RpkiObject>> groupedByHost =
-            objects.stream().collect(Collectors.groupingBy(o -> o.getUrl().getHost()));
+            objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
 
         final String formattedNow = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
 
-        final Path targetDirectory = Paths.get(config.getRsyncPath()).resolve("published-" + formattedNow);
-        final Path temporaryDirectory = Files.createTempDirectory(Paths.get(config.getRsyncPath()), "tmp-" + formattedNow + "-");
+        final Path targetDirectory = Paths.get(config.rsyncPath()).resolve("published-" + formattedNow);
+        final Path temporaryDirectory = Files.createTempDirectory(Paths.get(config.rsyncPath()), "tmp-" + formattedNow + "-");
         try {
             groupedByHost.forEach((hostName, os) -> {
                 // creeate a directory per hostname (in realistic cases there will be just one)
@@ -78,7 +78,7 @@ public class RsyncWriter {
                 os.stream()
                     .map(o ->
                         // remove the filename, i.e. /foo/bar/object.cer -> /foo/bar
-                        Paths.get(relativePath(o.getUrl().getPath())).getParent()
+                        Paths.get(relativePath(o.url().getPath())).getParent()
                     )
                     .sorted()
                     .distinct()
@@ -93,12 +93,12 @@ public class RsyncWriter {
                 fileWriterPool.submit(() -> os.stream()
                     .parallel()
                     .forEach(o -> {
-                        var path = Paths.get(relativePath(o.getUrl().getPath()));
+                        var path = Paths.get(relativePath(o.url().getPath()));
                         var fullPath = temporaryDirectory.resolve(hostName).resolve(path);
                         try {
-                            Files.write(fullPath, o.getBytes());
+                            Files.write(fullPath, o.bytes());
                             // rsync relies on the correct timestamp for fast synchronization
-                            Files.setLastModifiedTime(fullPath, FileTime.from(o.getCreatedAt()));
+                            Files.setLastModifiedTime(fullPath, FileTime.from(o.createdAt()));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
@@ -140,14 +140,14 @@ public class RsyncWriter {
     }
 
     private void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
-        long cutoff = now.toEpochMilli() - config.getTargetDirectoryRetentionPeriodMs();
+        long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
         try (
             Stream<Path> oldDirectories = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
-                .skip(config.getTargetDirectoryRetentionCopiesCount())
+                .skip(config.targetDirectoryRetentionCopiesCount())
                 .filter((directory) -> getLastModifiedTime(directory).toMillis() < cutoff)
         ) {
             fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {

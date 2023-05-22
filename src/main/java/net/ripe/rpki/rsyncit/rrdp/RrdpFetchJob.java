@@ -1,6 +1,7 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
 import lombok.extern.slf4j.Slf4j;
+import net.ripe.rpki.rsyncit.config.AppConfig;
 import net.ripe.rpki.rsyncit.service.SyncService;
 import org.quartz.JobBuilder;
 import org.quartz.JobDetail;
@@ -13,16 +14,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.quartz.QuartzJobBean;
 import org.springframework.stereotype.Component;
 
-import static org.quartz.SimpleScheduleBuilder.simpleSchedule;
+import static org.quartz.CronScheduleBuilder.cronSchedule;
 
 @Component
 @Slf4j
 public class RrdpFetchJob extends QuartzJobBean {
 
     private final SyncService syncService;
+    private final AppConfig appConfig;
 
-    public RrdpFetchJob(SyncService syncService) {
+    public RrdpFetchJob(SyncService syncService, AppConfig appConfig) {
         this.syncService = syncService;
+        this.appConfig = appConfig;
     }
 
     @Bean("Rrdp_Fetch_Job_Detail")
@@ -41,8 +44,7 @@ public class RrdpFetchJob extends QuartzJobBean {
             TriggerBuilder.newTrigger().forJob(job)
                 .withIdentity("Rrdp_Fetch_Job_Trigger")
                 .withDescription("Rrdp Fetch trigger")
-//                .withSchedule(cronSchedule(appConfig.getCron()))
-                .withSchedule(simpleSchedule().repeatForever().withIntervalInSeconds(600))
+                .withSchedule(cronSchedule(appConfig.getCron()))
                 .build();
     }
 

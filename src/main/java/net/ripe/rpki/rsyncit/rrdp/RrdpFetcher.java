@@ -1,11 +1,14 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-
 import net.ripe.rpki.rsyncit.config.Config;
+import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
-import org.apache.commons.lang3.tuple.Pair;
+import net.ripe.rpki.rsyncit.util.XML;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -33,9 +36,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import net.ripe.rpki.rsyncit.util.Sha256;
-import net.ripe.rpki.rsyncit.util.XML;
-
 @Slf4j
 @Getter
 public class RrdpFetcher {
@@ -46,11 +46,11 @@ public class RrdpFetcher {
 
     private String lastSnapshotUrl;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state, MeterRegistry meterRegistry) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
-        log.info("RrdpFetcher for {}", config.getRrdpUrl());
+        log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
     private byte[] blockForHttpGetRequest(String uri, Duration timeout) {
@@ -63,7 +63,7 @@ public class RrdpFetcher {
     private byte[] loadSnapshot(String snapshotUrl, String desiredSnapshotHash) throws SnapshotStructureException {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
-        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.getRequestTimeout());
+        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
 
         final String realSnapshotHash = Sha256.asString(snapshotBytes);
         if (!realSnapshotHash.equalsIgnoreCase(desiredSnapshotHash)) {
@@ -74,33 +74,32 @@ public class RrdpFetcher {
         return snapshotBytes;
     }
 
-    public List<RpkiObject> fetchObjects() {
+    public FetchResult fetchObjects() {
         try {
             return fetchObjectsEx();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            // it still may throw something unknown
+            return new FailedFetch(e);
         }
     }
 
-    public List<RpkiObject> fetchObjectsEx() throws SnapshotStructureException, SnapshotNotModifiedException, RepoUpdateAbortedException {
+    public FetchResult fetchObjectsEx() {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
-            final byte[] notificationBytes = blockForHttpGetRequest(config.getRrdpUrl(), config.getRequestTimeout());
+            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout());
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
             final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
+            final String notificationSessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
 
             final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
-//            final String snapshotUrl = config.overrideHostname(snapshotTag.getAttributes().getNamedItem("uri").getNodeValue());
             final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
             final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
 
-//            verifyNotNull(snapshotUrl);
             if (snapshotUrl.equals(lastSnapshotUrl)) {
-                log.info("not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
-//                metrics.success(notificationSerial, metrics.collisionCount());
-                throw new SnapshotNotModifiedException(snapshotUrl);
+                log.info("Not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
+                return new NoUpdates(notificationSessionId, notificationSerial);
             }
 
             long begin = System.currentTimeMillis();
@@ -115,44 +114,33 @@ public class RrdpFetcher {
 
             var processPublishElementResult = processPublishElements(doc);
 
-//            metrics.success(notificationSerial, processPublishElementResult.collisionCount);
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
 
-            return processPublishElementResult.objects;
-        } catch (SnapshotStructureException e) {
-//            metrics.failure();
-            throw e;
-        } catch (ParserConfigurationException | XPathExpressionException | SAXException | IOException | NumberFormatException e) {
-            // recall: IOException, ConnectException are subtypes of IOException
-//            metrics.failure();
-            throw new FetcherException(e);
+            return new SuccessfulFetch(processPublishElementResult.objects, notificationSessionId, notificationSerial);
+        } catch (SnapshotStructureException | ParserConfigurationException | XPathExpressionException | SAXException |
+                 IOException | NumberFormatException e) {
+            return new FailedFetch(e);
         } catch (IllegalStateException e) {
             if (e.getMessage().contains("Timeout")) {
-                log.info("Timeout while loading RRDP repo: url={}", config.getRrdpUrl());
-//                metrics.timeout();
-                throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
-            } else {
-                throw e;
+                log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
+                return new Timeout();
             }
+            return new FailedFetch(e);
         } catch (WebClientResponseException e) {
             var maybeRequest = Optional.ofNullable(e.getRequest());
             // Can be either a HTTP non-2xx or a timeout
             log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.", maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
             if (e.getStatusCode().is2xxSuccessful()) {
                 // Assume it's a timeout
-//                metrics.timeout();
-                throw new RepoUpdateAbortedException(Optional.ofNullable(e.getRequest()).map(HttpRequest::getURI).orElse(null), e);
-            } else {
-//                metrics.failure();
-                throw e;
+                return new Timeout();
             }
+            return new FailedFetch(e);
         } catch (WebClientRequestException e) {
             // TODO: Exception handling could be a lot nicer. However we are mixing reactive and synchronous code,
             //  and a nice solution probably requires major changes.
             log.error("Web client request exception, only known cause is a timeout.", e);
-//            metrics.timeout();
-            throw new RepoUpdateAbortedException(config.getRrdpUrl(), e);
+            return new Timeout();
         }
     }
 
@@ -205,14 +193,14 @@ public class RrdpFetcher {
             })
             // group by url to detect duplicate urls: keeps the first element, will cause a diff between
             // the sources being monitored.
-            .collect(Collectors.groupingBy(RpkiObject::getUrl))
+            .collect(Collectors.groupingBy(RpkiObject::url))
             // invariant: every group has at least 1 item
             .entrySet().stream()
             .map(item -> {
                 if (item.getValue().size() > 1) {
                     var collect = item.getValue().stream().map(coll ->
-                            Sha256.asString(coll.getBytes())).
-                            collect(Collectors.joining(", "));
+                            Sha256.asString(coll.bytes())).
+                        collect(Collectors.joining(", "));
                     log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), collect);
                     collisionCount.addAndGet(item.getValue().size() - 1);
                     return item.getValue().get(0);
@@ -226,6 +214,14 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {};
+    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
+
+    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch, Timeout {}
+
+    public record SuccessfulFetch(List<RpkiObject> objects, String sessionId, Integer serial) implements FetchResult {}
+    public record NoUpdates(String sessionId, Integer serial) implements FetchResult {}
+    public record FailedFetch(Exception exception) implements FetchResult {}
+    public record Timeout() implements FetchResult {}
+
 }
 
