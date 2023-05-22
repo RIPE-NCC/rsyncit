@@ -1,32 +1,20 @@
-FROM alpine:3.16 as build
+FROM eclipse-temurin:17-jdk-alpine
 
-ARG RSYNCIT_JAR=build/libs/rsyncit-0.0.1-SNAPSHOT.jar
+VOLUME /data
+VOLUME /conf
 
-RUN mkdir -p /data/rsync
+RUN apk update && apk add --no-cache rsync
 
-ADD . /app
-COPY ${RSYNCIT_JAR} /app/rsyncit.jar
+ARG JAR_FILE
+COPY ${JAR_FILE} rsyncit.jar
 
-WORKDIR /app
+COPY docker/run.sh run.sh
 
-# use gcr.io/distroless/java-debian10:11-debug if you want to be able to run a
-# shell in the container (e.g. `docker run -it --entrypoint sh --rm <image>`)
-FROM gcr.io/distroless/java-debian10:11
-LABEL org.label-schema.vcs-ref="unknown"
+RUN chmod +x /run.sh
+RUN mkdir -p /var/log/rsyncd/
 
 EXPOSE 8080
+EXPOSE 873
+EXPOSE 5005
 
-VOLUME ["/data"]
-
-ENV JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true \
-    -Djava.net.preferIPv4Addresses=true \
-    -Dapp.name=rsyncit \
-    -Xms1g \
-    -Xmx2g \
-    -XX:+HeapDumpOnOutOfMemoryError \
-    -XX:HeapDumpPath=/data/dumps/pubserver-heap-dump.hprof \
-    -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
-    -DrsyncPath=/data/rsync \
-    -DrrdpUrl=https://rrdp.ripe.net/notification.xml"
-
-CMD ["/app/rsyncit.jar"]
+CMD [ "/run.sh" ]
