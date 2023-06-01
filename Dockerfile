@@ -6,7 +6,7 @@ VOLUME /conf
 RUN apk update && apk add --no-cache rsync
 
 ARG JAR_FILE
-COPY ${JAR_FILE} rsyncit.jar
+COPY ${JAR_FILE} /rsyncit.jar
 
 COPY docker/run.sh run.sh
 
