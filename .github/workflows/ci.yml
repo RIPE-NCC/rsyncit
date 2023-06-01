@@ -10,5 +10,5 @@ jobs:
     needs: gradle-build
     with:
       jar-artifact: rsyncit-jar
-      tags: ghcr.io/ripe-ncc/rsyncit:unstable
+      tags: ghcr.io/ripe-ncc/rsyncit:latest
       push: ${{ github.ref == 'refs/heads/main' }}
