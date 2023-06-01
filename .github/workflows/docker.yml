@@ -28,7 +28,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.jar-artifact }}
-          path: rsyncit.jar
+          path: rsyncit
 
       - name: Login to GHCR
         uses: docker/login-action@v1
@@ -51,7 +51,7 @@ jobs:
           tags: ${{ inputs.tags }}
           labels: "org.label-schema.vcs-ref=${{ github.sha }}"
           build-args: |
-            JAR_FILE=rsyncit.jar   
+            JAR_FILE=rsyncit/rsyncit*.jar   
 
       - name: Image digest
         run: echo ${{ steps.docker_build_rsyncit.outputs.digest }}
