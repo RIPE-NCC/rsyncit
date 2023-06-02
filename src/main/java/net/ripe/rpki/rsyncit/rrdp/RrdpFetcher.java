@@ -1,7 +1,5 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -29,10 +27,12 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -53,25 +53,31 @@ public class RrdpFetcher {
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
-    private byte[] blockForHttpGetRequest(String uri, Duration timeout) {
-        return httpClient.get().uri(uri).retrieve().bodyToMono(byte[].class).block(timeout);
+    private Downloaded blockForHttpGetRequest(String uri, Duration timeout) {
+        var lastModified = new AtomicLong(0);
+        var body = httpClient.get().uri(uri).retrieve()
+            .toEntity(byte[].class)
+            .doOnSuccess(e -> {
+                lastModified.set(e.getHeaders().getLastModified());
+            })
+            .block(timeout)
+            .getBody();
+        return new Downloaded(body, Instant.ofEpochMilli(lastModified.get()));
     }
 
     /**
      * Load snapshot and validate hash
      */
-    private byte[] loadSnapshot(String snapshotUrl, String desiredSnapshotHash) throws SnapshotStructureException {
+    private Downloaded loadSnapshot(String snapshotUrl, String expectedSnapshotHash) throws SnapshotStructureException {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
-        final byte[] snapshotBytes = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
-
-        final String realSnapshotHash = Sha256.asString(snapshotBytes);
-        if (!realSnapshotHash.equalsIgnoreCase(desiredSnapshotHash)) {
+        var snapshot = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
+        final String realSnapshotHash = Sha256.asString(snapshot.content());
+        if (!realSnapshotHash.equalsIgnoreCase(expectedSnapshotHash)) {
             throw new SnapshotStructureException(snapshotUrl,
-                "with len(content) = %d had sha256(content) = %s, expected %s".formatted(snapshotBytes.length, realSnapshotHash, desiredSnapshotHash));
+                "with len(content) = %d had sha256(content) = %s, expected %s".formatted(snapshot.content().length, realSnapshotHash, expectedSnapshotHash));
         }
-
-        return snapshotBytes;
+        return snapshot;
     }
 
     public FetchResult fetchObjects() {
@@ -87,7 +93,7 @@ public class RrdpFetcher {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
-            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout());
+            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout()).content();
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
             final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
@@ -103,16 +109,16 @@ public class RrdpFetcher {
             }
 
             long begin = System.currentTimeMillis();
-            final byte[] snapshotContent = loadSnapshot(snapshotUrl, desiredSnapshotHash);
+            var snapshot = loadSnapshot(snapshotUrl, desiredSnapshotHash);
             long end = System.currentTimeMillis();
             log.info("Downloaded snapshot in {}ms", (end - begin));
 
-            final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshotContent));
+            final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.content()));
             var doc = snapshotXmlDoc.getDocumentElement();
 
             validateSnapshotStructure(notificationSerial, snapshotUrl, doc);
 
-            var processPublishElementResult = processPublishElements(doc);
+            var processPublishElementResult = processPublishElements(doc, snapshot.lastModified());
 
             // We have successfully updated from the snapshot, store the URL
             lastSnapshotUrl = snapshotUrl;
@@ -162,11 +168,12 @@ public class RrdpFetcher {
         }
     }
 
-    private ProcessPublishElementResult processPublishElements(Element doc) throws XPathExpressionException {
+    private ProcessPublishElementResult processPublishElements(Element doc, Instant lastModified) throws XPathExpressionException {
         var queryPublish = XPathFactory.newDefaultInstance().newXPath().compile("/snapshot/publish");
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
-        var now = Instant.now();
+        var now = makeTimestampForObjects(lastModified);
+        log.debug("Will use {} as last modification timestamp for files", now);
         var collisionCount = new AtomicInteger();
 
         var decoder = Base64.getDecoder();
@@ -214,6 +221,19 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
+    /**
+     * Generate timestamp that will be tracked per object and used as FS modification timestamp.
+     * Use last-modified header from the snapshot if accessible, otherwise truncate current time
+     * to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
+     * so rounding down to an hour should generate the same timestamps _most of the time_.
+     */
+    private Instant makeTimestampForObjects(Instant lastModified) {
+        if (lastModified != null) {
+            return lastModified;
+        }
+        return Instant.now().truncatedTo(ChronoUnit.HOURS);
+    }
+
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
 
     public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch, Timeout {}
@@ -222,6 +242,8 @@ public class RrdpFetcher {
     public record NoUpdates(String sessionId, Integer serial) implements FetchResult {}
     public record FailedFetch(Exception exception) implements FetchResult {}
     public record Timeout() implements FetchResult {}
+
+    public record Downloaded(byte[] content, Instant lastModified) {};
 
 }
 
