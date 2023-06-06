@@ -1,6 +1,5 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
-import io.micrometer.core.instrument.MeterRegistry;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
@@ -32,7 +31,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -46,7 +45,7 @@ public class RrdpFetcher {
 
     private String lastSnapshotUrl;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state, MeterRegistry meterRegistry) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
@@ -54,15 +53,18 @@ public class RrdpFetcher {
     }
 
     private Downloaded blockForHttpGetRequest(String uri, Duration timeout) {
-        var lastModified = new AtomicLong(0);
+        var lastModified = new AtomicReference<Instant>(null);
         var body = httpClient.get().uri(uri).retrieve()
             .toEntity(byte[].class)
             .doOnSuccess(e -> {
-                lastModified.set(e.getHeaders().getLastModified());
+                final long modified = e.getHeaders().getLastModified();
+                if (modified != -1) {
+                    lastModified.set(Instant.ofEpochMilli(modified));
+                }
             })
             .block(timeout)
             .getBody();
-        return new Downloaded(body, Instant.ofEpochMilli(lastModified.get()));
+        return new Downloaded(body, lastModified.get());
     }
 
     /**
@@ -205,8 +207,9 @@ public class RrdpFetcher {
             .entrySet().stream()
             .map(item -> {
                 if (item.getValue().size() > 1) {
-                    var collect = item.getValue().stream().map(coll ->
-                            Sha256.asString(coll.bytes())).
+                    var collect = item.getValue().
+                        stream().
+                        map(coll -> Sha256.asString(coll.bytes())).
                         collect(Collectors.joining(", "));
                     log.warn("Multiple objects for {}, keeping first element: {}", item.getKey(), collect);
                     collisionCount.addAndGet(item.getValue().size() - 1);
