@@ -10,6 +10,8 @@ plugins {
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 
+apply from: "dependencies.gradle"
+
 group = 'net.ripe.rpki'
 version = '0.0.1-SNAPSHOT'
 
@@ -30,6 +32,8 @@ dependencies {
 
     implementation 'com.google.guava:guava:31.1-jre'
     implementation 'org.apache.commons:commons-lang3:3.0'
+
+    implementation "net.ripe.rpki:rpki-commons:$rpki_commons_version"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

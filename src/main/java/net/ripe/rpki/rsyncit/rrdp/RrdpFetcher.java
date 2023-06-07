@@ -2,6 +2,14 @@ package net.ripe.rpki.rsyncit.rrdp;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
+import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
+import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
+import net.ripe.rpki.commons.crypto.cms.ghostbuster.GhostbustersCmsParser;
+import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
+import net.ripe.rpki.commons.crypto.crl.X509Crl;
+import net.ripe.rpki.commons.util.RepositoryObjectType;
+import net.ripe.rpki.commons.validation.ValidationResult;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
@@ -174,8 +182,9 @@ public class RrdpFetcher {
         var queryPublish = XPathFactory.newDefaultInstance().newXPath().compile("/snapshot/publish");
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
-        var now = makeTimestampForObjects(lastModified);
-        log.debug("Will use {} as last modification timestamp for files", now);
+        var defaultTimestamp = makeTimestampForObjects(lastModified);
+
+        var now = Instant.now();
         var collisionCount = new AtomicInteger();
 
         var decoder = Base64.getDecoder();
@@ -183,6 +192,7 @@ public class RrdpFetcher {
         var t = Time.timed(() -> IntStream
             .range(0, publishedObjects.getLength())
             .mapToObj(publishedObjects::item)
+            .parallel()
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
@@ -192,8 +202,17 @@ public class RrdpFetcher {
                     // off before decoding. See also:
                     // https://www.w3.org/TR/2004/PER-xmlschema-2-20040318/datatypes.html#base64Binary
                     var decoded = decoder.decode(content.trim());
+
                     var hash = Sha256.asString(decoded);
-                    final Instant createAt = state.getOrUpdateCreatedAt(hash, now);
+
+                    // Try to get some creation timestamp from the object itself. If it's not impossible to parse
+                    // the object, use the default based on the last-modified header of the snapshot.
+                    //
+                    // Cache the timestamp per hash do avoid re-parsing every object in the snapshot every time.
+                    //
+                    final Instant createAt = state.cacheTimestamps(hash, now,
+                        () -> getTimestampForObject(objectUri, decoded, defaultTimestamp));
+
                     return new RpkiObject(URI.create(objectUri), decoded, createAt);
                 } catch (RuntimeException e) {
                     log.error("Cannot decode object data for URI {}\n{}", objectUri, content);
@@ -235,6 +254,52 @@ public class RrdpFetcher {
             return lastModified;
         }
         return Instant.now().truncatedTo(ChronoUnit.HOURS);
+    }
+
+    private Instant getTimestampForObject(final String objectUri, final byte[] decoded, Instant lastModified) {
+        final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
+        try {
+            return switch (objectType) {
+                case Manifest -> {
+                    ManifestCmsParser manifestCmsParser = new ManifestCmsParser();
+                    manifestCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    final var manifestCms = manifestCmsParser.getManifestCms();
+                    yield Instant.ofEpochMilli(manifestCms.getThisUpdateTime().getMillis());
+                }
+                case Aspa -> {
+                    var aspaCmsParser = new AspaCmsParser();
+                    aspaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    var aspaCms = aspaCmsParser.getAspa();
+                    yield Instant.ofEpochMilli(aspaCms.getNotValidBefore().getMillis());
+                }
+                case Roa -> {
+                    RoaCmsParser roaCmsParser = new RoaCmsParser();
+                    roaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    final var roaCms = roaCmsParser.getRoaCms();
+                    yield Instant.ofEpochMilli(roaCms.getNotValidBefore().getMillis());
+                }
+                case Certificate -> {
+                    X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
+                    x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    final var cert = x509CertificateParser.getCertificate().getCertificate();
+                    yield Instant.ofEpochMilli(cert.getNotBefore().getTime());
+                }
+                case Crl -> {
+                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, ValidationResult.withLocation(objectUri));
+                    final var crl = x509Crl.getCrl();
+                    yield Instant.ofEpochMilli(crl.getThisUpdate().getTime());
+                }
+                case Gbr -> {
+                    GhostbustersCmsParser ghostbustersCmsParser = new GhostbustersCmsParser();
+                    ghostbustersCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    final var ghostbusterCms = ghostbustersCmsParser.getGhostbustersCms();
+                    yield Instant.ofEpochMilli(ghostbusterCms.getNotValidBefore().getMillis());
+                }
+                case Unknown -> lastModified;
+            };
+        } catch (Exception e) {
+            return lastModified;
+        }
     }
 
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}

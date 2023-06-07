@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 @Getter
 public class State {
@@ -33,11 +34,12 @@ public class State {
         hashesToDelete.forEach(times::remove);
     }
 
-    public synchronized Instant getOrUpdateCreatedAt(String hash, Instant now) {
+    public synchronized Instant cacheTimestamps(String hash, Instant now, Supplier<Instant> createdAt) {
         var ts = times.get(hash);
         if (ts == null) {
-            times.put(hash, new Times(now, now));
-            return now;
+            var createdAtValue = createdAt.get();
+            times.put(hash, new Times(createdAtValue, now));
+            return createdAtValue;
         } else {
             ts.setLastMentioned(now);
             return ts.getCreatedAt();
