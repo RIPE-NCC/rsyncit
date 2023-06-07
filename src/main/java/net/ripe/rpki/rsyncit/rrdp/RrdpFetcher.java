@@ -182,11 +182,17 @@ public class RrdpFetcher {
         var queryPublish = XPathFactory.newDefaultInstance().newXPath().compile("/snapshot/publish");
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
-        var defaultTimestamp = makeTimestampForObjects(lastModified);
+        // Generate timestamp that will be tracked per object and used as FS modification timestamp.
+        // Use last-modified header from the snapshot if accessible, otherwise truncate current time
+        // to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
+        // so rounding down to an hour should generate the same timestamps _most of the time_.
+        //
+        var defaultTimestamp = lastModified != null ? lastModified : Instant.now().truncatedTo(ChronoUnit.HOURS);
 
+        // This timestamp is only needed for marking objects in the timestamp cache
         var now = Instant.now();
-        var collisionCount = new AtomicInteger();
 
+        var collisionCount = new AtomicInteger();
         var decoder = Base64.getDecoder();
 
         var t = Time.timed(() -> IntStream
@@ -205,7 +211,7 @@ public class RrdpFetcher {
 
                     var hash = Sha256.asString(decoded);
 
-                    // Try to get some creation timestamp from the object itself. If it's not impossible to parse
+                    // Try to get some creation timestamp from the object itself. If it's impossible to parse
                     // the object, use the default based on the last-modified header of the snapshot.
                     //
                     // Cache the timestamp per hash do avoid re-parsing every object in the snapshot every time.
@@ -241,19 +247,6 @@ public class RrdpFetcher {
         var objects = t.getResult();
         log.info("Constructed {} objects in {}ms", objects.size(), t.getTime());
         return new ProcessPublishElementResult(objects, collisionCount.get());
-    }
-
-    /**
-     * Generate timestamp that will be tracked per object and used as FS modification timestamp.
-     * Use last-modified header from the snapshot if accessible, otherwise truncate current time
-     * to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
-     * so rounding down to an hour should generate the same timestamps _most of the time_.
-     */
-    private Instant makeTimestampForObjects(Instant lastModified) {
-        if (lastModified != null) {
-            return lastModified;
-        }
-        return Instant.now().truncatedTo(ChronoUnit.HOURS);
     }
 
     private Instant getTimestampForObject(final String objectUri, final byte[] decoded, Instant lastModified) {
