@@ -31,6 +31,7 @@ import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -209,15 +210,15 @@ public class RrdpFetcher {
                     // https://www.w3.org/TR/2004/PER-xmlschema-2-20040318/datatypes.html#base64Binary
                     var decoded = decoder.decode(content.trim());
 
-                    var hash = Sha256.asString(decoded);
+                    var hash = Sha256.asBytes(decoded);
 
                     // Try to get some creation timestamp from the object itself. If it's impossible to parse
                     // the object, use the default based on the last-modified header of the snapshot.
                     //
                     // Cache the timestamp per hash do avoid re-parsing every object in the snapshot every time.
                     //
-                    final Instant createAt = state.cacheTimestamps(hash, now,
-                        () -> getTimestampForObject(objectUri, decoded, defaultTimestamp));
+                    final Instant createAt = state.cacheTimestamps(Sha256.asString(hash), now,
+                        () -> spiceWithHash(getTimestampForObject(objectUri, decoded, defaultTimestamp), hash));
 
                     return new RpkiObject(URI.create(objectUri), decoded, createAt);
                 } catch (RuntimeException e) {
@@ -293,6 +294,16 @@ public class RrdpFetcher {
         } catch (Exception e) {
             return lastModified;
         }
+    }
+
+    /**
+     * Add artificial millisecond offset to the timestamp based on hash of the object.
+     * This MAY help for the corner case of objects having second-accuracy timestamps
+     * and the timestatmp being the same for multiple objects.
+     */
+    private Instant spiceWithHash(Instant t, byte[] hash) {
+        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000L));
+        return t.truncatedTo(ChronoUnit.SECONDS).plusMillis(ms.longValue());
     }
 
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
