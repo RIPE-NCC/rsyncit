@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 @Getter
@@ -17,10 +18,10 @@ public class State {
 
     @Setter
     RrdpState rrdpState;
-    Map<String, Times> times;
+    ConcurrentHashMap<String, Times> times;
 
     public State() {
-        this.times = new HashMap<>();
+        this.times = new ConcurrentHashMap<>();
     }
 
     // Remove entries that were not mentioned in RRDP repository for a while
@@ -34,16 +35,10 @@ public class State {
         hashesToDelete.forEach(times::remove);
     }
 
-    public synchronized Instant cacheTimestamps(String hash, Instant now, Supplier<Instant> createdAt) {
-        var ts = times.get(hash);
-        if (ts == null) {
-            var createdAtValue = createdAt.get();
-            times.put(hash, new Times(createdAtValue, now));
-            return createdAtValue;
-        } else {
-            ts.setLastMentioned(now);
-            return ts.getCreatedAt();
-        }
+    public Instant cacheTimestamps(String hash, Instant now, Supplier<Instant> createdAt) {
+        var ts = times.computeIfAbsent(hash, h -> new Times(createdAt.get(), now));
+        ts.setLastMentioned(now);
+        return ts.getCreatedAt();
     }
 
     @Data

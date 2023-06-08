@@ -196,10 +196,13 @@ public class RrdpFetcher {
         var collisionCount = new AtomicInteger();
         var decoder = Base64.getDecoder();
 
-        var t = Time.timed(() -> IntStream
+        var objectItems = IntStream
             .range(0, publishedObjects.getLength())
             .mapToObj(publishedObjects::item)
-            .parallel()
+            .toList();
+
+        var t = Time.timed(() -> objectItems
+            .parallelStream()
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
