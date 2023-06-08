@@ -184,13 +184,13 @@ public class RrdpFetcher {
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
         // Generate timestamp that will be tracked per object and used as FS modification timestamp.
-        // Use last-modified header from the snapshot if accessible, otherwise truncate current time
+        // Use last-modified header from the snapshot if available, otherwise truncate current time
         // to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
         // so rounding down to an hour should generate the same timestamps _most of the time_.
         //
         var defaultTimestamp = lastModified != null ? lastModified : Instant.now().truncatedTo(ChronoUnit.HOURS);
 
-        // This timestamp is only needed for marking objects in the timestamp cache
+        // This timestamp is only needed for marking objects in the timestamp cache.
         var now = Instant.now();
 
         var collisionCount = new AtomicInteger();
@@ -302,7 +302,7 @@ public class RrdpFetcher {
     /**
      * Add artificial millisecond offset to the timestamp based on hash of the object.
      * This MAY help for the corner case of objects having second-accuracy timestamps
-     * and the timestatmp being the same for multiple objects.
+     * and the timestatmp in seconds being the same for multiple objects.
      */
     private Instant spiceWithHash(Instant t, byte[] hash) {
         final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000L));
