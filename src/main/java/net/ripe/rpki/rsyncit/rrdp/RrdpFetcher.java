@@ -2,6 +2,7 @@ package net.ripe.rpki.rsyncit.rrdp;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
 import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
 import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
@@ -14,6 +15,7 @@ import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
 import net.ripe.rpki.rsyncit.util.XML;
+import org.joda.time.DateTime;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -257,41 +259,27 @@ public class RrdpFetcher {
         final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
             return switch (objectType) {
-                case Manifest -> {
-                    ManifestCmsParser manifestCmsParser = new ManifestCmsParser();
-                    manifestCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var manifestCms = manifestCmsParser.getManifestCms();
-                    yield Instant.ofEpochMilli(manifestCms.getThisUpdateTime().getMillis());
-                }
-                case Aspa -> {
-                    var aspaCmsParser = new AspaCmsParser();
-                    aspaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    var aspaCms = aspaCmsParser.getAspa();
-                    yield Instant.ofEpochMilli(aspaCms.getNotValidBefore().getMillis());
-                }
-                case Roa -> {
-                    RoaCmsParser roaCmsParser = new RoaCmsParser();
-                    roaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var roaCms = roaCmsParser.getRoaCms();
-                    yield Instant.ofEpochMilli(roaCms.getNotValidBefore().getMillis());
-                }
-                case Certificate -> {
+                case Manifest:
+                case Aspa:
+                case Roa:
+                case Gbr:
+                    var signedObjectParser = new RpkiSignedObjectParser() {
+                        public DateTime getPublicSigningTime() {
+                            return getSigningTime();
+                        }
+                    };
+
+                    signedObjectParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    yield Instant.ofEpochMilli(signedObjectParser.getPublicSigningTime().getMillis());
+                case Certificate:
                     X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
                     x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
                     final var cert = x509CertificateParser.getCertificate().getCertificate();
                     yield Instant.ofEpochMilli(cert.getNotBefore().getTime());
-                }
-                case Crl -> {
+                case Crl:
                     final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, ValidationResult.withLocation(objectUri));
                     final var crl = x509Crl.getCrl();
                     yield Instant.ofEpochMilli(crl.getThisUpdate().getTime());
-                }
-                case Gbr -> {
-                    GhostbustersCmsParser ghostbustersCmsParser = new GhostbustersCmsParser();
-                    ghostbustersCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var ghostbusterCms = ghostbustersCmsParser.getGhostbustersCms();
-                    yield Instant.ofEpochMilli(ghostbusterCms.getNotValidBefore().getMillis());
-                }
                 case Unknown -> lastModified;
             };
         } catch (Exception e) {
