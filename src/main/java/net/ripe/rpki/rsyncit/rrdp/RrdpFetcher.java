@@ -2,6 +2,7 @@ package net.ripe.rpki.rsyncit.rrdp;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
 import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
 import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
 import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
@@ -253,6 +254,10 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
+    private static Instant extractSigningTime(RpkiSignedObject o) {
+        return Instant.ofEpochMilli(o.getSigningTime().getMillis());
+    }
+
     private Instant getTimestampForObject(final String objectUri, final byte[] decoded, Instant lastModified) {
         final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
@@ -260,20 +265,17 @@ public class RrdpFetcher {
                 case Manifest -> {
                     ManifestCmsParser manifestCmsParser = new ManifestCmsParser();
                     manifestCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var manifestCms = manifestCmsParser.getManifestCms();
-                    yield Instant.ofEpochMilli(manifestCms.getThisUpdateTime().getMillis());
+                    yield extractSigningTime(manifestCmsParser.getManifestCms());
                 }
                 case Aspa -> {
                     var aspaCmsParser = new AspaCmsParser();
                     aspaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    var aspaCms = aspaCmsParser.getAspa();
-                    yield Instant.ofEpochMilli(aspaCms.getNotValidBefore().getMillis());
+                    yield extractSigningTime(aspaCmsParser.getAspa());
                 }
                 case Roa -> {
                     RoaCmsParser roaCmsParser = new RoaCmsParser();
                     roaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var roaCms = roaCmsParser.getRoaCms();
-                    yield Instant.ofEpochMilli(roaCms.getNotValidBefore().getMillis());
+                    yield extractSigningTime(roaCmsParser.getRoaCms());
                 }
                 case Certificate -> {
                     X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
@@ -289,8 +291,7 @@ public class RrdpFetcher {
                 case Gbr -> {
                     GhostbustersCmsParser ghostbustersCmsParser = new GhostbustersCmsParser();
                     ghostbustersCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var ghostbusterCms = ghostbustersCmsParser.getGhostbustersCms();
-                    yield Instant.ofEpochMilli(ghostbusterCms.getNotValidBefore().getMillis());
+                    yield extractSigningTime(ghostbustersCmsParser.getGhostbustersCms());
                 }
                 case Unknown -> lastModified;
             };
