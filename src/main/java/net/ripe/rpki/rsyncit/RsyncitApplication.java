@@ -27,7 +27,7 @@ public class RsyncitApplication {
         // Explicit event loop is required for custom DnsNameResolverBuilder
         NioEventLoopGroup group = new NioEventLoopGroup(1);
 
-        return new WebClientBuilderFactory(group, baseBuilder, "rpki-monitor %s".formatted(appConfig.getInfo().gitCommitId()));
+        return new WebClientBuilderFactory(group, baseBuilder, "rsyncit %s".formatted(appConfig.getInfo().gitCommitId()));
     }
 
 }

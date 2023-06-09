@@ -15,6 +15,7 @@ import org.springframework.scheduling.quartz.QuartzJobBean;
 import org.springframework.stereotype.Component;
 
 import static org.quartz.CronScheduleBuilder.cronSchedule;
+import static org.quartz.SimpleScheduleBuilder.simpleSchedule;
 
 @Component
 @Slf4j
@@ -44,7 +45,8 @@ public class RrdpFetchJob extends QuartzJobBean {
             TriggerBuilder.newTrigger().forJob(job)
                 .withIdentity("Rrdp_Fetch_Job_Trigger")
                 .withDescription("Rrdp Fetch trigger")
-                .withSchedule(cronSchedule(appConfig.getCron()))
+//                .withSchedule(cronSchedule(appConfig.getCron()))
+                .withSchedule(simpleSchedule().repeatForever().withIntervalInSeconds(180))
                 .build();
     }
 

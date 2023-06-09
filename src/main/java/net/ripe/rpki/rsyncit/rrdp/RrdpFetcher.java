@@ -53,8 +53,6 @@ public class RrdpFetcher {
     private final WebClient httpClient;
     private final State state;
 
-    private String lastSnapshotUrl;
-
     public RrdpFetcher(Config config, WebClient httpClient, State state) {
         this.config = config;
         this.httpClient = httpClient;
@@ -108,16 +106,18 @@ public class RrdpFetcher {
             final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout()).content();
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
-            final int notificationSerial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
-            final String notificationSessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
+            final int serial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
+            final String sessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
 
             final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
             final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
             final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
 
-            if (snapshotUrl.equals(lastSnapshotUrl)) {
-                log.info("Not updating: snapshot url {} is the same as during the last check.", snapshotUrl);
-                return new NoUpdates(notificationSessionId, notificationSerial);
+            if (state.getRrdpState() != null &&
+                sessionId.equals(state.getRrdpState().getSessionId()) &&
+                serial == state.getRrdpState().getSerial()) {
+                log.info("Not updating: session_id {} and serial {} are the same as previous run.", sessionId, serial);
+                return new NoUpdates(sessionId, serial);
             }
 
             long begin = System.currentTimeMillis();
@@ -128,14 +128,11 @@ public class RrdpFetcher {
             final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.content()));
             var doc = snapshotXmlDoc.getDocumentElement();
 
-            validateSnapshotStructure(notificationSerial, snapshotUrl, doc);
+            validateSnapshotStructure(serial, snapshotUrl, doc);
 
             var processPublishElementResult = processPublishElements(doc, snapshot.lastModified());
 
-            // We have successfully updated from the snapshot, store the URL
-            lastSnapshotUrl = snapshotUrl;
-
-            return new SuccessfulFetch(processPublishElementResult.objects, notificationSessionId, notificationSerial);
+            return new SuccessfulFetch(processPublishElementResult.objects, sessionId, serial);
         } catch (SnapshotStructureException | ParserConfigurationException | XPathExpressionException | SAXException |
                  IOException | NumberFormatException e) {
             return new FailedFetch(e);
