@@ -33,7 +33,7 @@ dependencies {
     implementation 'com.google.guava:guava:31.1-jre'
     implementation 'org.apache.commons:commons-lang3:3.0'
 
-    implementation "net.ripe.rpki:rpki-commons:$rpki_commons_version"
+    implementation "net.ripe.rpki:rpki-commons:1.35"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

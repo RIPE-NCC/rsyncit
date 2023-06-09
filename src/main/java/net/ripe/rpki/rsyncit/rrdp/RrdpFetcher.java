@@ -5,10 +5,6 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
-import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
-import net.ripe.rpki.commons.crypto.cms.ghostbuster.GhostbustersCmsParser;
-import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
-import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
 import net.ripe.rpki.commons.crypto.crl.X509Crl;
 import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
 import net.ripe.rpki.commons.util.RepositoryObjectType;
@@ -17,6 +13,7 @@ import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
 import net.ripe.rpki.rsyncit.util.XML;
+import org.joda.time.DateTime;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -120,7 +117,7 @@ public class RrdpFetcher {
             return new FailedFetch(e);
         } catch (WebClientRequestException e) {
             // TODO: Exception handling could be a lot nicer. However we are mixing reactive and synchronous code,
-            //  and a nice solution probably requires major changes.
+            // and a nice solution probably requires major changes.
             log.error("Web client request exception, only known cause is a timeout.", e);
             return new Timeout();
         }
@@ -288,28 +285,29 @@ public class RrdpFetcher {
         final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
             return switch (objectType) {
-                case Certificate -> {
+                case Manifest:
+                case Aspa:
+                case Roa:
+                case Gbr:
+                    var signedObjectParser = new RpkiSignedObjectParser() {
+                        public DateTime getPublicSigningTime() {
+                            return getSigningTime();
+                        }
+                    };
+
+                    signedObjectParser.parse(ValidationResult.withLocation(objectUri), decoded);
+                    yield Instant.ofEpochMilli(signedObjectParser.getPublicSigningTime().getMillis());
+                case Certificate:
                     X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
                     x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
                     final var cert = x509CertificateParser.getCertificate().getCertificate();
                     yield Instant.ofEpochMilli(cert.getNotBefore().getTime());
-                }
-                case Crl -> {
-                    final ValidationResult result = ValidationResult.withLocation(objectUri);
-                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, result);
-                    checkResult(objectUri, result);
-                    yield Instant.ofEpochMilli(x509Crl.getCrl().getThisUpdate().getTime());
-                }
-                case Manifest ->
-                    extractSigningTime(tryParse(new ManifestCmsParser(), objectUri, decoded).getManifestCms());
-                case Aspa ->
-                    extractSigningTime(tryParse(new AspaCmsParser(), objectUri, decoded).getAspa());
-                case Roa ->
-                    extractSigningTime(tryParse(new RoaCmsParser(), objectUri, decoded).getRoaCms());
-                case Gbr ->
-                    extractSigningTime(tryParse(new GhostbustersCmsParser(), objectUri, decoded).getGhostbustersCms());
-                case Unknown ->
-                    lastModified;
+                case Crl:
+                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, ValidationResult.withLocation(objectUri));
+                    final var crl = x509Crl.getCrl();
+                    yield Instant.ofEpochMilli(crl.getThisUpdate().getTime());
+                case Unknown:
+                    yield lastModified;
             };
         } catch (Exception e) {
             metrics.badObject();
