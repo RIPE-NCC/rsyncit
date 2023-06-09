@@ -24,7 +24,6 @@ public class SyncService {
     private final WebClientBuilderFactory webClientFactory;
     private final AppConfig appConfig;
     private final State state;
-    private final MeterRegistry meterRegistry;
     private final RRDPFetcherMetrics metrics;
 
     @Autowired
@@ -33,14 +32,13 @@ public class SyncService {
                        MeterRegistry meterRegistry) {
         this.webClientFactory = webClientFactory;
         this.appConfig = appConfig;
-        this.meterRegistry = meterRegistry;
         this.metrics = new RRDPFetcherMetrics(meterRegistry);
         this.state = new State();
     }
 
     public void sync() {
         var config = appConfig.getConfig();
-        var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state, meterRegistry);
+        var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state);
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
