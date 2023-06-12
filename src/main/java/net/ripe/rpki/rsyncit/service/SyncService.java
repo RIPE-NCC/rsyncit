@@ -24,7 +24,6 @@ public class SyncService {
     private final WebClientBuilderFactory webClientFactory;
     private final AppConfig appConfig;
     private final State state;
-    private final MeterRegistry meterRegistry;
     private final RRDPFetcherMetrics metrics;
 
     @Autowired
@@ -33,7 +32,6 @@ public class SyncService {
                        MeterRegistry meterRegistry) {
         this.webClientFactory = webClientFactory;
         this.appConfig = appConfig;
-        this.meterRegistry = meterRegistry;
         this.metrics = new RRDPFetcherMetrics(meterRegistry);
         this.state = new State();
     }
