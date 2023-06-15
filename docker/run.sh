@@ -9,14 +9,11 @@ else
 fi
 
 echo "Running rsyncit..."
-java -Djava.net.preferIPv4Stack=true \
-    -Djava.net.preferIPv4Addresses=true \
-    -Dapp.name=rsyncit \
-    -Xms1g \
-    -Xmx3g \
+java -Dapp.name=rsyncit \
+    -Xms2g \
+    -Xmx2g \
     -XX:+HeapDumpOnOutOfMemoryError \
-    -XX:HeapDumpPath=/data/dumps/rsync.hprof \
-    -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
+    -XX:HeapDumpPath=/data/rsync.hprof \
     -DrsyncPath=/data \
     -jar /rsyncit.jar
 
