@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -104,37 +105,39 @@ public class RrdpFetcher {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
             final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout()).content();
+            if (notificationBytes == null || notificationBytes.length == 0) {
+                throw new NotificationStructureException("Empty notification file");
+            }
             final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
-            final int serial = Integer.parseInt(notificationXmlDoc.getDocumentElement().getAttribute("serial"));
-            final String sessionId = notificationXmlDoc.getDocumentElement().getAttribute("session_id");
-
-            final Node snapshotTag = notificationXmlDoc.getDocumentElement().getElementsByTagName("snapshot").item(0);
-            final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
-            final String desiredSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
-
+            var notification = validateNotificationStructure(notificationXmlDoc);
             if (state.getRrdpState() != null &&
-                sessionId.equals(state.getRrdpState().getSessionId()) &&
-                serial == state.getRrdpState().getSerial()) {
-                log.info("Not updating: session_id {} and serial {} are the same as previous run.", sessionId, serial);
-                return new NoUpdates(sessionId, serial);
+                notification.sessionId().equals(state.getRrdpState().getSessionId()) &&
+                Objects.equals(notification.serial(), state.getRrdpState().getSerial())) {
+                log.info("Not updating: session_id {} and serial {} are the same as previous run.", notification.sessionId(), notification.serial());
+                return new NoUpdates(notification.sessionId(), notification.serial());
             }
 
             long begin = System.currentTimeMillis();
-            var snapshot = loadSnapshot(snapshotUrl, desiredSnapshotHash);
+            var snapshot = loadSnapshot(notification.snapshotUrl(), notification.expectedSnapshotHash());
             long end = System.currentTimeMillis();
             log.info("Downloaded snapshot in {}ms", (end - begin));
 
             final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.content()));
             var doc = snapshotXmlDoc.getDocumentElement();
 
-            validateSnapshotStructure(serial, snapshotUrl, doc);
+            validateSnapshotStructure(notification.serial(), notification.snapshotUrl(), doc);
 
             var processPublishElementResult = processPublishElements(doc, snapshot.lastModified());
 
-            return new SuccessfulFetch(processPublishElementResult.objects, sessionId, serial);
-        } catch (SnapshotStructureException | ParserConfigurationException | XPathExpressionException | SAXException |
-                 IOException | NumberFormatException e) {
+            return new SuccessfulFetch(processPublishElementResult.objects, notification.sessionId(), notification.serial());
+        } catch (NotificationStructureException |
+                 SnapshotStructureException |
+                 ParserConfigurationException |
+                 XPathExpressionException |
+                 SAXException |
+                 IOException |
+                 NumberFormatException e) {
             return new FailedFetch(e);
         } catch (IllegalStateException e) {
             if (e.getMessage().contains("Timeout")) {
@@ -157,6 +160,23 @@ public class RrdpFetcher {
             log.error("Web client request exception, only known cause is a timeout.", e);
             return new Timeout();
         }
+    }
+
+    private static NotificationXml validateNotificationStructure(Document notification) throws XPathExpressionException, NotificationStructureException {
+        final int serial = Integer.parseInt(notification.getDocumentElement().getAttribute("serial"));
+        final String sessionId = notification.getDocumentElement().getAttribute("session_id");
+
+        final NodeList snapshotTags = notification.getDocumentElement().getElementsByTagName("snapshot");
+        if (snapshotTags.getLength() == 0) {
+            throw new NotificationStructureException("No snapshot tag in the notification file.");
+        }
+        if (snapshotTags.getLength() > 1) {
+            throw new NotificationStructureException("More than one snapshot tag in the notification file.");
+        }
+        final Node snapshotTag = snapshotTags.item(0);
+        final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
+        final String expectedSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
+        return new NotificationXml(sessionId, serial, snapshotUrl, expectedSnapshotHash);
     }
 
     private static void validateSnapshotStructure(int notificationSerial, String snapshotUrl, Element doc) throws XPathExpressionException, SnapshotStructureException {
@@ -306,6 +326,8 @@ public class RrdpFetcher {
         final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000L));
         return t.truncatedTo(ChronoUnit.SECONDS).plusMillis(ms.longValue());
     }
+
+    record NotificationXml(String sessionId, Integer serial, String snapshotUrl, String expectedSnapshotHash) {}
 
     record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
 
