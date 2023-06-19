@@ -83,6 +83,9 @@ public class RrdpFetcher {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
         var snapshot = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
+        if (snapshot.content() == null || snapshot.content().length == 0) {
+            throw new SnapshotStructureException(snapshotUrl, "Empty snapshot");
+        }
         final String realSnapshotHash = Sha256.asString(snapshot.content());
         if (!realSnapshotHash.equalsIgnoreCase(expectedSnapshotHash)) {
             throw new SnapshotStructureException(snapshotUrl,
