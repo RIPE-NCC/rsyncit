@@ -1,5 +1,6 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import com.google.common.util.concurrent.AtomicDouble;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -8,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class RRDPFetcherMetrics {
     private final AtomicInteger rrdpSerial = new AtomicInteger();
+    private final AtomicDouble snapshotDownloadMs = new AtomicDouble();
     private final Counter successfulUpdates;
     private final Counter failedUpdates;
     private final Counter timeoutUpdates;
@@ -19,6 +21,10 @@ public final class RRDPFetcherMetrics {
 
         Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
             .description("Serial of the RRDP notification.xml at the given URL")
+            .register(meterRegistry);
+
+        Gauge.builder("rsyncit.fetcher.rrdp.snapshot.download.time", snapshotDownloadMs::get)
+            .description("Time to download snapshot")
             .register(meterRegistry);
     }
 
@@ -42,4 +48,7 @@ public final class RRDPFetcherMetrics {
             .register(registry);
     }
 
+    public void snapshotDownloadTime(long time) {
+        this.snapshotDownloadMs.set(time);
+    }
 }

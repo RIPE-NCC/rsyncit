@@ -53,11 +53,13 @@ public class RrdpFetcher {
     private final Config config;
     private final WebClient httpClient;
     private final State state;
+    private final RRDPFetcherMetrics metrics;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state, RRDPFetcherMetrics metrics) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
+        this.metrics = metrics;
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
@@ -79,7 +81,7 @@ public class RrdpFetcher {
     /**
      * Load snapshot and validate hash
      */
-    private Downloaded loadSnapshot(String snapshotUrl, String expectedSnapshotHash) throws SnapshotStructureException {
+    private Downloaded loadSnapshot(String snapshotUrl, String expectedSnapshotHash) {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
         var snapshot = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
@@ -121,17 +123,16 @@ public class RrdpFetcher {
                 return new NoUpdates(notification.sessionId(), notification.serial());
             }
 
-            long begin = System.currentTimeMillis();
-            var snapshot = loadSnapshot(notification.snapshotUrl(), notification.expectedSnapshotHash());
-            long end = System.currentTimeMillis();
-            log.info("Downloaded snapshot in {}ms", (end - begin));
+            var snapshot = Time.timed(() -> loadSnapshot(notification.snapshotUrl(), notification.expectedSnapshotHash()));
+            log.info("Downloaded snapshot in {}ms", snapshot.getTime());
+            metrics.snapshotDownloadTime(snapshot.getTime());
 
-            final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.content()));
+            final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.getResult().content()));
             var doc = snapshotXmlDoc.getDocumentElement();
 
             validateSnapshotStructure(notification.serial(), notification.snapshotUrl(), doc);
 
-            var processPublishElementResult = processPublishElements(doc, snapshot.lastModified());
+            var processPublishElementResult = processPublishElements(doc, snapshot.getResult().lastModified());
 
             return new SuccessfulFetch(processPublishElementResult.objects, notification.sessionId(), notification.serial());
         } catch (NotificationStructureException |

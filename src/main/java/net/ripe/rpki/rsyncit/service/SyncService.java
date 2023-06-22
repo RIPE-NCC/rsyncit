@@ -38,7 +38,7 @@ public class SyncService {
 
     public void sync() {
         var config = appConfig.getConfig();
-        var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state);
+        var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state, metrics);
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
