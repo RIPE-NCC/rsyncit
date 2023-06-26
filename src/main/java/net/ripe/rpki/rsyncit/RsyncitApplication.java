@@ -1,9 +1,13 @@
 package net.ripe.rpki.rsyncit;
 
+import io.micrometer.common.KeyValues;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.reactive.function.client.ClientRequestObservationContext;
+import org.springframework.web.reactive.function.client.ClientRequestObservationConvention;
+import org.springframework.web.reactive.function.client.DefaultClientRequestObservationConvention;
 import org.springframework.web.reactive.function.client.WebClient;
 import net.ripe.rpki.rsyncit.util.http.WebClientBuilderFactory;
 import net.ripe.rpki.rsyncit.config.AppConfig;
@@ -30,4 +34,19 @@ public class RsyncitApplication {
         return new WebClientBuilderFactory(group, baseBuilder, "rsyncit %s".formatted(appConfig.getInfo().gitCommitId()));
     }
 
+    /**
+     * Return an observation customiser that only differs in that it omits the URL.
+     * The hostname for the request is the clientName.
+     *
+     * The full URL is in a high cardinality value (which would be used by observability tools)
+     */
+    @Bean
+    public ClientRequestObservationConvention nonUriClientRequestObservationConvention() {
+        return new DefaultClientRequestObservationConvention() {
+            @Override
+            public KeyValues getLowCardinalityKeyValues(ClientRequestObservationContext context) {
+                return KeyValues.of(method(context), status(context), clientName(context), exception(context), outcome(context));
+            }
+        };
+    }
 }
