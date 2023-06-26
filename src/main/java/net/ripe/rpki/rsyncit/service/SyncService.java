@@ -9,9 +9,9 @@ import net.ripe.rpki.rsyncit.rrdp.RrdpFetcher;
 import net.ripe.rpki.rsyncit.rrdp.State;
 import net.ripe.rpki.rsyncit.rsync.RsyncWriter;
 import net.ripe.rpki.rsyncit.util.Time;
-import net.ripe.rpki.rsyncit.util.http.WebClientBuilderFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -21,24 +21,24 @@ import java.time.temporal.ChronoUnit;
 @Getter
 public class SyncService {
 
-    private final WebClientBuilderFactory webClientFactory;
+    private final WebClient webClient;
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
 
     @Autowired
-    public SyncService(WebClientBuilderFactory webClientFactory,
+    public SyncService(WebClient webClient,
                        AppConfig appConfig,
                        MeterRegistry meterRegistry) {
-        this.webClientFactory = webClientFactory;
         this.appConfig = appConfig;
+        this.webClient = webClient;
         this.metrics = new RRDPFetcherMetrics(meterRegistry);
         this.state = new State();
     }
 
     public void sync() {
         var config = appConfig.getConfig();
-        var rrdpFetcher = new RrdpFetcher(config, webClientFactory.builder().build(), state);
+        var rrdpFetcher = new RrdpFetcher(config, webClient, state);
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
