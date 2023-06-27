@@ -35,7 +35,7 @@ public class RsyncitApplication {
     }
 
     @Bean
-    public WebClient.Builder webclientConfiguration(WebClient.Builder baseBuilder, AppConfig appConfig) {
+    public WebClient webclientConfiguration(WebClient.Builder baseBuilder, AppConfig appConfig) {
         final var userAgent = "rsyncit %s".formatted(appConfig.getInfo().gitCommitId());
 
         var httpClient = HttpClient.create()
@@ -52,7 +52,8 @@ public class RsyncitApplication {
 
         return baseBuilder
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .defaultHeader(HttpHeaders.USER_AGENT, userAgent);
+                .defaultHeader(HttpHeaders.USER_AGENT, userAgent)
+                .build();
     }
 
     /**
