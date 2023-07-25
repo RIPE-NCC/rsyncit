@@ -61,7 +61,7 @@ public class RrdpFetcher {
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
-    private Downloaded blockForHttpGetRequest(String uri, Duration timeout) {
+    private Downloaded download(String uri, Duration timeout) {
         var lastModified = new AtomicReference<Instant>(null);
         var body = httpClient.get().uri(uri).retrieve()
             .toEntity(byte[].class)
@@ -82,7 +82,7 @@ public class RrdpFetcher {
     private Downloaded loadSnapshot(String snapshotUrl, String expectedSnapshotHash) throws SnapshotStructureException {
         log.info("loading RRDP snapshot from {}", snapshotUrl);
 
-        var snapshot = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
+        var snapshot = download(snapshotUrl, config.requestTimeout());
         if (snapshot.content() == null || snapshot.content().length == 0) {
             throw new SnapshotStructureException(snapshotUrl, "Empty snapshot");
         }
@@ -107,7 +107,7 @@ public class RrdpFetcher {
         try {
             final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
 
-            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout()).content();
+            final byte[] notificationBytes = download(config.rrdpUrl(), config.requestTimeout()).content();
             if (notificationBytes == null || notificationBytes.length == 0) {
                 throw new NotificationStructureException("Empty notification file");
             }
@@ -151,7 +151,8 @@ public class RrdpFetcher {
         } catch (WebClientResponseException e) {
             var maybeRequest = Optional.ofNullable(e.getRequest());
             // Can be either a HTTP non-2xx or a timeout
-            log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.", maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
+            log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.",
+                maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
             if (e.getStatusCode().is2xxSuccessful()) {
                 // Assume it's a timeout
                 return new Timeout();
