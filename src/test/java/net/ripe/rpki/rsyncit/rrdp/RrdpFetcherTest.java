@@ -1,9 +1,8 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
-import net.ripe.rpki.rsyncit.config.Config;
+import net.ripe.rpki.TestDefaults;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.reactive.function.client.WebClient;
 import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 
@@ -11,9 +10,7 @@ import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.xpath.XPathExpressionException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -125,21 +122,9 @@ class RrdpFetcherTest {
     }
 
     private RrdpFetcher.FetchResult tryFetch(String notificationXml, String snapshotXml) throws NotificationStructureException, XPathExpressionException, IOException, ParserConfigurationException, SAXException {
-        var fetcher = new RrdpFetcher(defaultConfig(), defaultWebClient(), new State());
+        var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultWebClient(), new State());
         return fetcher.processNotificationXml(notificationXml.getBytes(StandardCharsets.UTF_8),
             url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Instant.now()));
-    }
-
-    private Config defaultConfig() {
-        return new Config("https://rrdp.ripe.net/notification.xml",
-            "/tmp/rsync",
-            "0 0/10 * * * ?",
-            Duration.of(1, ChronoUnit.MINUTES),
-            3600_000, 10);
-    }
-
-    private WebClient defaultWebClient() {
-        return WebClient.builder().build();
     }
 
 }
