@@ -69,7 +69,7 @@ class RsyncWriterTest {
     }
 
     @Test
-    public void testRemoveOldDirectories() {
+    public void testRemoveOldDirectoriesWhenTheyAreOld() {
         final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
             rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
                 new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
@@ -90,6 +90,26 @@ class RsyncWriterTest {
                 // path2 should also be deleted as old
                 assertThat(Files.exists(path2)).isFalse();
                 assertThat(Files.exists(path3)).isTrue();
+            });
+    }
+
+    @Test
+    public void testRemoveOldDirectoriesButKeepSomeNumberOfThem() {
+        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
+            rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
+                new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
+            ).collect(Collectors.toList()));
+
+        withRsyncWriter(
+            // make it ridiculous so that we clean up everything except for the last directory
+            config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(2),
+            rsyncWriter -> {
+                var path1 = writeSomeObjects.apply(rsyncWriter);
+                sleep(200);
+                var path2 = writeSomeObjects.apply(rsyncWriter);
+                // Nothing should be deleted, because we want to keep more older copies
+                assertThat(Files.exists(path1)).isTrue();
+                assertThat(Files.exists(path2)).isTrue();
             });
     }
 
