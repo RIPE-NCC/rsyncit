@@ -1,5 +1,6 @@
 package net.ripe.rpki.rsyncit.rsync;
 
+import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +17,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static net.ripe.rpki.TestDefaults.defaultConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +68,39 @@ class RsyncWriterTest {
         });
     }
 
+    @Test
+    public void testRemoveOldDirectories() {
+        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
+            rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
+                new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
+            ).collect(Collectors.toList()));
+
+        withRsyncWriter(
+            // make it ridiculous so that we clean up everything except for the last directory
+            config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
+            rsyncWriter -> {
+                var path1 = writeSomeObjects.apply(rsyncWriter);
+                sleep(200);
+                var path2 = writeSomeObjects.apply(rsyncWriter);
+                // path1 should be deleted as old
+                assertThat(Files.exists(path1)).isFalse();
+                assertThat(Files.exists(path2)).isTrue();
+                sleep(200);
+                var path3 = writeSomeObjects.apply(rsyncWriter);
+                // path2 should also be deleted as old
+                assertThat(Files.exists(path2)).isFalse();
+                assertThat(Files.exists(path3)).isTrue();
+            });
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static void checkFile(Path path, byte[] bytes) {
         try {
             final File file = path.toFile();
@@ -75,26 +112,34 @@ class RsyncWriterTest {
         }
     }
 
-    static void withRsyncWriter(Consumer<RsyncWriter> actualTest) {
+    static void withRsyncWriter(Function<Config, Config> transformConfig, Consumer<RsyncWriter> actualTest) {
         Path tmp = null;
         try {
-            tmp = Files.createTempDirectory(Path.of(defaultConfig().rsyncPath()), "rsync-writer-test-");
-            var config = defaultConfig(tmp.toAbsolutePath().toString());
-            actualTest.accept(new RsyncWriter(config));
+            final Config config = defaultConfig();
+            final Path rsyncitDir = Files.createTempDirectory("rsyncit");
+            final Config config1 = config.withRsyncPath(rsyncitDir.toAbsolutePath().toString());
+            tmp = Files.createTempDirectory(Path.of(config1.rsyncPath()), "rsync-writer-test-");
+            final Config config2 = config.withRsyncPath(tmp.toAbsolutePath().toString());
+            actualTest.accept(new RsyncWriter(transformConfig.apply(config2)));
         } catch (IOException e) {
             throw new RuntimeException(e);
         } finally {
-            assert tmp != null;
-            tmp.toFile().delete();
+            if (tmp != null) {
+                tmp.toFile().delete();
+            }
         }
     }
 
-    private static final Random r = new Random();
+    static void withRsyncWriter(Consumer<RsyncWriter> actualTest) {
+        withRsyncWriter(Function.identity(), actualTest);
+    }
+
+    private static final Random random = new Random();
 
     private static byte[] someBytes() {
-        var length = r.nextInt(1000, 2000);
+        var length = random.nextInt(1000, 2000);
         var bytes = new byte[length];
-        r.nextBytes(bytes);
+        random.nextBytes(bytes);
         return bytes;
     }
 

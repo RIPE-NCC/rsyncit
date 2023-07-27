@@ -8,12 +8,8 @@ import java.time.temporal.ChronoUnit;
 
 public class TestDefaults {
     public static Config defaultConfig() {
-        return defaultConfig("/tmp/rsync");
-    }
-
-    public static Config defaultConfig(String rsyncPath) {
         return new Config("https://rrdp.ripe.net/notification.xml",
-            rsyncPath,
+            "/tmp/rsync",
             "0 0/10 * * * ?",
             Duration.of(1, ChronoUnit.MINUTES),
             3600_000, 10);

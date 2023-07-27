@@ -141,7 +141,7 @@ public class RsyncWriter {
         Files.move(symlink, targetSymlink, ATOMIC_MOVE, REPLACE_EXISTING);
     }
 
-    private void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
+    void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
         long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
         try (
