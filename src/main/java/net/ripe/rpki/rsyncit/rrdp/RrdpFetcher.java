@@ -4,11 +4,11 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
 import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
-import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
-import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
 import net.ripe.rpki.commons.crypto.cms.ghostbuster.GhostbustersCmsParser;
-import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
+import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
+import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
 import net.ripe.rpki.commons.crypto.crl.X509Crl;
+import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
 import net.ripe.rpki.commons.util.RepositoryObjectType;
 import net.ripe.rpki.commons.validation.ValidationResult;
 import net.ripe.rpki.rsyncit.config.Config;
@@ -43,6 +43,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -61,7 +63,7 @@ public class RrdpFetcher {
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
-    private Downloaded blockForHttpGetRequest(String uri, Duration timeout) {
+    private Downloaded download(String uri, Duration timeout) {
         var lastModified = new AtomicReference<Instant>(null);
         var body = httpClient.get().uri(uri).retrieve()
             .toEntity(byte[].class)
@@ -76,24 +78,6 @@ public class RrdpFetcher {
         return new Downloaded(body, lastModified.get());
     }
 
-    /**
-     * Load snapshot and validate hash
-     */
-    private Downloaded loadSnapshot(String snapshotUrl, String expectedSnapshotHash) throws SnapshotStructureException {
-        log.info("loading RRDP snapshot from {}", snapshotUrl);
-
-        var snapshot = blockForHttpGetRequest(snapshotUrl, config.requestTimeout());
-        if (snapshot.content() == null || snapshot.content().length == 0) {
-            throw new SnapshotStructureException(snapshotUrl, "Empty snapshot");
-        }
-        final String realSnapshotHash = Sha256.asString(snapshot.content());
-        if (!realSnapshotHash.equalsIgnoreCase(expectedSnapshotHash)) {
-            throw new SnapshotStructureException(snapshotUrl,
-                "with len(content) = %d had sha256(content) = %s, expected %s".formatted(snapshot.content().length, realSnapshotHash, expectedSnapshotHash));
-        }
-        return snapshot;
-    }
-
     public FetchResult fetchObjects() {
         try {
             return fetchObjectsEx();
@@ -105,35 +89,8 @@ public class RrdpFetcher {
 
     public FetchResult fetchObjectsEx() {
         try {
-            final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
-
-            final byte[] notificationBytes = blockForHttpGetRequest(config.rrdpUrl(), config.requestTimeout()).content();
-            if (notificationBytes == null || notificationBytes.length == 0) {
-                throw new NotificationStructureException("Empty notification file");
-            }
-            final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
-
-            var notification = validateNotificationStructure(notificationXmlDoc);
-            if (state.getRrdpState() != null &&
-                notification.sessionId().equals(state.getRrdpState().getSessionId()) &&
-                Objects.equals(notification.serial(), state.getRrdpState().getSerial())) {
-                log.info("Not updating: session_id {} and serial {} are the same as previous run.", notification.sessionId(), notification.serial());
-                return new NoUpdates(notification.sessionId(), notification.serial());
-            }
-
-            long begin = System.currentTimeMillis();
-            var snapshot = loadSnapshot(notification.snapshotUrl(), notification.expectedSnapshotHash());
-            long end = System.currentTimeMillis();
-            log.info("Downloaded snapshot in {}ms", (end - begin));
-
-            final Document snapshotXmlDoc = documentBuilder.parse(new ByteArrayInputStream(snapshot.content()));
-            var doc = snapshotXmlDoc.getDocumentElement();
-
-            validateSnapshotStructure(notification.serial(), notification.snapshotUrl(), doc);
-
-            var processPublishElementResult = processPublishElements(doc, snapshot.lastModified());
-
-            return new SuccessfulFetch(processPublishElementResult.objects, notification.sessionId(), notification.serial());
+            final byte[] notificationBytes = download(config.rrdpUrl(), config.requestTimeout()).content();
+            return processNotificationXml(notificationBytes, this::loadSnapshot);
         } catch (NotificationStructureException |
                  SnapshotStructureException |
                  ParserConfigurationException |
@@ -151,7 +108,8 @@ public class RrdpFetcher {
         } catch (WebClientResponseException e) {
             var maybeRequest = Optional.ofNullable(e.getRequest());
             // Can be either a HTTP non-2xx or a timeout
-            log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.", maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
+            log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.",
+                maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
             if (e.getStatusCode().is2xxSuccessful()) {
                 // Assume it's a timeout
                 return new Timeout();
@@ -165,7 +123,42 @@ public class RrdpFetcher {
         }
     }
 
-    private static NotificationXml validateNotificationStructure(Document notification) throws XPathExpressionException, NotificationStructureException {
+    FetchResult processNotificationXml(byte[] notificationBytes, Function<String, Downloaded> getSnapshot) throws NotificationStructureException, SAXException,
+        IOException, XPathExpressionException, SnapshotStructureException, ParserConfigurationException {
+        if (notificationBytes == null || notificationBytes.length == 0) {
+            throw new NotificationStructureException("Empty notification file.");
+        }
+        final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
+        final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
+
+        var notification = validateNotificationStructure(notificationXmlDoc);
+        if (state.getRrdpState() != null &&
+            notification.sessionId().equals(state.getRrdpState().getSessionId()) &&
+            Objects.equals(notification.serial(), state.getRrdpState().getSerial())) {
+            log.info("Not updating: session_id {} and serial {} are the same as previous run.", notification.sessionId(), notification.serial());
+            return new NoUpdates(notification.sessionId(), notification.serial());
+        }
+        var downloaded = Time.timed(() -> getSnapshot.apply(notification.snapshotUrl()));
+        log.info("Downloaded snapshot in {}ms", downloaded.getTime());
+
+        var snapshotContent = downloaded.getResult().content();
+        if (snapshotContent == null || snapshotContent.length == 0) {
+            throw new SnapshotStructureException(notification.snapshotUrl(), "Empty snapshot");
+        }
+        final String realSnapshotHash = Sha256.asString(snapshotContent);
+        if (!realSnapshotHash.equalsIgnoreCase(notification.expectedSnapshotHash())) {
+            throw new SnapshotStructureException(notification.snapshotUrl(),
+                "with len(content) = %d had sha256(content) = %s, expected %s".formatted(snapshotContent.length, realSnapshotHash, notification.expectedSnapshotHash()));
+        }
+        var document = documentBuilder.parse(new ByteArrayInputStream(snapshotContent)).getDocumentElement();
+
+        validateSnapshotStructure(notification.serial(), notification.snapshotUrl(), document);
+        var processPublishElementResult = processPublishElements(document, downloaded.getResult().lastModified());
+
+        return new SuccessfulFetch(processPublishElementResult.objects, notification.sessionId(), notification.serial());
+    }
+
+    private static NotificationXml validateNotificationStructure(Document notification) throws NotificationStructureException {
         final int serial = Integer.parseInt(notification.getDocumentElement().getAttribute("serial"));
         final String sessionId = notification.getDocumentElement().getAttribute("session_id");
 
@@ -180,6 +173,11 @@ public class RrdpFetcher {
         final String snapshotUrl = snapshotTag.getAttributes().getNamedItem("uri").getNodeValue();
         final String expectedSnapshotHash = snapshotTag.getAttributes().getNamedItem("hash").getNodeValue();
         return new NotificationXml(sessionId, serial, snapshotUrl, expectedSnapshotHash);
+    }
+
+    private Downloaded loadSnapshot(String snapshotUrl) {
+        log.info("Loading RRDP snapshot from {}", snapshotUrl);
+        return download(snapshotUrl, config.requestTimeout());
     }
 
     private static void validateSnapshotStructure(int notificationSerial, String snapshotUrl, Element doc) throws XPathExpressionException, SnapshotStructureException {
@@ -330,18 +328,31 @@ public class RrdpFetcher {
         return t.truncatedTo(ChronoUnit.SECONDS).plusMillis(ms.longValue());
     }
 
-    record NotificationXml(String sessionId, Integer serial, String snapshotUrl, String expectedSnapshotHash) {}
+    record NotificationXml(String sessionId, Integer serial, String snapshotUrl, String expectedSnapshotHash) {
+    }
 
-    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {}
+    record ProcessPublishElementResult(List<RpkiObject> objects, int collisionCount) {
+    }
 
-    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch, Timeout {}
+    public sealed interface FetchResult permits SuccessfulFetch, NoUpdates, FailedFetch, Timeout {
+    }
 
-    public record SuccessfulFetch(List<RpkiObject> objects, String sessionId, Integer serial) implements FetchResult {}
-    public record NoUpdates(String sessionId, Integer serial) implements FetchResult {}
-    public record FailedFetch(Exception exception) implements FetchResult {}
-    public record Timeout() implements FetchResult {}
+    public record SuccessfulFetch(List<RpkiObject> objects, String sessionId, Integer serial) implements FetchResult {
+    }
 
-    public record Downloaded(byte[] content, Instant lastModified) {};
+    public record NoUpdates(String sessionId, Integer serial) implements FetchResult {
+    }
+
+    public record FailedFetch(Exception exception) implements FetchResult {
+    }
+
+    public record Timeout() implements FetchResult {
+    }
+
+    public record Downloaded(byte[] content, Instant lastModified) {
+    }
+
+    ;
 
 }
 

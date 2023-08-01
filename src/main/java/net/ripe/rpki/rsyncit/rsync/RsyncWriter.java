@@ -1,5 +1,6 @@
 package net.ripe.rpki.rsyncit.rsync;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
@@ -35,6 +36,7 @@ public class RsyncWriter {
 
     private final ForkJoinPool fileWriterPool = new ForkJoinPool(2 * Runtime.getRuntime().availableProcessors());
 
+    @Getter
     private final Config config;
 
     public RsyncWriter(Config config) {
@@ -139,7 +141,7 @@ public class RsyncWriter {
         Files.move(symlink, targetSymlink, ATOMIC_MOVE, REPLACE_EXISTING);
     }
 
-    private void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
+    void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
         long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
         try (

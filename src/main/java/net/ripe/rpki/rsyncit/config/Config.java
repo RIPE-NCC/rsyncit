@@ -1,7 +1,10 @@
 package net.ripe.rpki.rsyncit.config;
 
+import lombok.With;
+
 import java.time.Duration;
 
+@With
 public record Config(
     String rrdpUrl,
     String rsyncPath,
