@@ -138,7 +138,8 @@ public class RrdpFetcher {
             log.info("Not updating: session_id {} and serial {} are the same as previous run.", notification.sessionId(), notification.serial());
             return new NoUpdates(notification.sessionId(), notification.serial());
         }
-        var downloaded = Time.timed(() -> getSnapshot.apply(notification.snapshotUrl()));
+        var actualSnapshotUrl = config.substituteHost().apply(notification.snapshotUrl());
+        var downloaded = Time.timed(() -> getSnapshot.apply(actualSnapshotUrl));
         log.info("Downloaded snapshot in {}ms", downloaded.getTime());
 
         var snapshotContent = downloaded.getResult().content();
