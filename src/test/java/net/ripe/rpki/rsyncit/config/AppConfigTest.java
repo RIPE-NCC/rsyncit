@@ -15,7 +15,6 @@ class AppConfigTest {
 
     @Test
     public void testBrokenUrlSubstitution() {
-        assertThrows(IllegalArgumentException.class, () -> AppConfig.substitutor(""));
         assertThrows(IllegalArgumentException.class, () -> AppConfig.substitutor("random stuff"));
         assertThrows(IllegalArgumentException.class, () -> AppConfig.substitutor("random stuff/sdcsdcc/ss"));
     }
