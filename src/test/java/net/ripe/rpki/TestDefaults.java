@@ -5,10 +5,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.function.Function;
 
 public class TestDefaults {
     public static Config defaultConfig() {
         return new Config("https://rrdp.ripe.net/notification.xml",
+            Function.identity(),
             "/tmp/rsync",
             "0 0/10 * * * ?",
             Duration.of(1, ChronoUnit.MINUTES),
