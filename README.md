@@ -27,6 +27,6 @@ There are other parameters in `AppConfig` class, but they have reasonable defaul
     docker run -p 8080:8080 -p 8730:873 \
         -v path-to-conf-dir:/conf
         --env RRDPURL="https://rrdp.ripe.net/notification.xml" \
-        rsyncit/0.0.`
+        rsyncit/0.0.1`
     ```
  Setting `--env NO_RSYNCD=true` will not run `rsyncd` inside of the container so only `rsyncit` Java process will be started. 
