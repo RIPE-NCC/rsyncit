@@ -11,11 +11,16 @@ public final class RRDPFetcherMetrics {
     private final Counter successfulUpdates;
     private final Counter failedUpdates;
     private final Counter timeoutUpdates;
+    private final Counter objectFailures;
 
     public RRDPFetcherMetrics(MeterRegistry meterRegistry) {
         successfulUpdates = buildCounter("success", meterRegistry);
         failedUpdates = buildCounter("failed", meterRegistry);
         timeoutUpdates = buildCounter("timeout", meterRegistry);
+        objectFailures = Counter.builder("rsyncit.fetcher.objects")
+            .description("Metrics on objects")
+            .tag("status", "failure")
+            .register(meterRegistry);
 
         Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
             .description("Serial of the RRDP notification.xml at the given URL")
@@ -33,6 +38,10 @@ public final class RRDPFetcherMetrics {
 
     public void timeout() {
         this.timeoutUpdates.increment();
+    }
+
+    public void badObject() {
+        this.objectFailures.increment();
     }
 
     private static Counter buildCounter(String statusTag, MeterRegistry registry) {

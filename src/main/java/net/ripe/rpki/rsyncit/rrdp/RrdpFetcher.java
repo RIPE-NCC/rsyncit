@@ -55,11 +55,13 @@ public class RrdpFetcher {
     private final Config config;
     private final WebClient httpClient;
     private final State state;
+    private final RRDPFetcherMetrics metrics;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state, RRDPFetcherMetrics metrics) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
+        this.metrics = metrics;
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
@@ -226,7 +228,6 @@ public class RrdpFetcher {
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
-
                 try {
                     // Surrounding whitespace is allowed by xsd:base64Binary. Trim that
                     // off before decoding. See also:
@@ -245,6 +246,7 @@ public class RrdpFetcher {
 
                     return new RpkiObject(URI.create(objectUri), decoded, createAt);
                 } catch (RuntimeException e) {
+                    metrics.badObject();
                     log.error("Cannot decode object data for URI {}\n{}", objectUri, content);
                     throw e;
                 }
@@ -305,6 +307,7 @@ public class RrdpFetcher {
                     lastModified;
             };
         } catch (Exception e) {
+            metrics.badObject();
             var encoder = Base64.getEncoder();
             log.error("Could not parse the object url = {}, body = {} :", objectUri, encoder.encodeToString(decoded), e);
             return lastModified;
