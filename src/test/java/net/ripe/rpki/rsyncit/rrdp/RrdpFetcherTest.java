@@ -1,7 +1,9 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import net.ripe.rpki.TestDefaults;
 import net.ripe.rpki.rsyncit.util.Sha256;
+import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
 import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
@@ -122,7 +124,7 @@ class RrdpFetcherTest {
     }
 
     private RrdpFetcher.FetchResult tryFetch(String notificationXml, String snapshotXml) throws NotificationStructureException, XPathExpressionException, IOException, ParserConfigurationException, SAXException {
-        var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultWebClient(), new State());
+        var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultWebClient(), new State(), new RRDPFetcherMetrics(new SimpleMeterRegistry()));
         return fetcher.processNotificationXml(notificationXml.getBytes(StandardCharsets.UTF_8),
             url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Instant.now()));
     }

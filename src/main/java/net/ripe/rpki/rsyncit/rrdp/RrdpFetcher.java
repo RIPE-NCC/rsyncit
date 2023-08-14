@@ -3,6 +3,7 @@ package net.ripe.rpki.rsyncit.rrdp;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
+import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
 import net.ripe.rpki.commons.crypto.cms.ghostbuster.GhostbustersCmsParser;
 import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
@@ -43,7 +44,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -55,11 +55,13 @@ public class RrdpFetcher {
     private final Config config;
     private final WebClient httpClient;
     private final State state;
+    private final RRDPFetcherMetrics metrics;
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state) {
+    public RrdpFetcher(Config config, WebClient httpClient, State state, RRDPFetcherMetrics metrics) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
+        this.metrics = metrics;
         log.info("RrdpFetcher for {}", config.rrdpUrl());
     }
 
@@ -226,7 +228,6 @@ public class RrdpFetcher {
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
-
                 try {
                     // Surrounding whitespace is allowed by xsd:base64Binary. Trim that
                     // off before decoding. See also:
@@ -245,6 +246,7 @@ public class RrdpFetcher {
 
                     return new RpkiObject(URI.create(objectUri), decoded, createAt);
                 } catch (RuntimeException e) {
+                    metrics.badObject();
                     log.error("Cannot decode object data for URI {}\n{}", objectUri, content);
                     throw e;
                 }
@@ -281,21 +283,6 @@ public class RrdpFetcher {
         final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
             return switch (objectType) {
-                case Manifest -> {
-                    ManifestCmsParser manifestCmsParser = new ManifestCmsParser();
-                    manifestCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    yield extractSigningTime(manifestCmsParser.getManifestCms());
-                }
-                case Aspa -> {
-                    var aspaCmsParser = new AspaCmsParser();
-                    aspaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    yield extractSigningTime(aspaCmsParser.getAspa());
-                }
-                case Roa -> {
-                    RoaCmsParser roaCmsParser = new RoaCmsParser();
-                    roaCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    yield extractSigningTime(roaCmsParser.getRoaCms());
-                }
                 case Certificate -> {
                     X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
                     x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
@@ -303,19 +290,40 @@ public class RrdpFetcher {
                     yield Instant.ofEpochMilli(cert.getNotBefore().getTime());
                 }
                 case Crl -> {
-                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, ValidationResult.withLocation(objectUri));
-                    final var crl = x509Crl.getCrl();
-                    yield Instant.ofEpochMilli(crl.getThisUpdate().getTime());
+                    final ValidationResult result = ValidationResult.withLocation(objectUri);
+                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, result);
+                    checkResult(objectUri, result);
+                    yield Instant.ofEpochMilli(x509Crl.getCrl().getThisUpdate().getTime());
                 }
-                case Gbr -> {
-                    GhostbustersCmsParser ghostbustersCmsParser = new GhostbustersCmsParser();
-                    ghostbustersCmsParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    yield extractSigningTime(ghostbustersCmsParser.getGhostbustersCms());
-                }
-                case Unknown -> lastModified;
+                case Manifest ->
+                    extractSigningTime(tryParse(new ManifestCmsParser(), objectUri, decoded).getManifestCms());
+                case Aspa ->
+                    extractSigningTime(tryParse(new AspaCmsParser(), objectUri, decoded).getAspa());
+                case Roa ->
+                    extractSigningTime(tryParse(new RoaCmsParser(), objectUri, decoded).getRoaCms());
+                case Gbr ->
+                    extractSigningTime(tryParse(new GhostbustersCmsParser(), objectUri, decoded).getGhostbustersCms());
+                case Unknown ->
+                    lastModified;
             };
         } catch (Exception e) {
+            metrics.badObject();
+            var encoder = Base64.getEncoder();
+            log.error("Could not parse the object url = {}, body = {} :", objectUri, encoder.encodeToString(decoded), e);
             return lastModified;
+        }
+    }
+
+    private static <T extends RpkiSignedObjectParser> T tryParse(T parser, final String objectUri, final byte[] decoded) {
+        final ValidationResult result = ValidationResult.withLocation(objectUri);
+        parser.parse(result, decoded);
+        checkResult(objectUri, result);
+        return parser;
+    }
+
+    private static void checkResult(String objectUri, ValidationResult result) {
+        if (result.hasFailures()) {
+            throw new RuntimeException(String.format("Object %s, error %s", objectUri, result.getFailuresForAllLocations()));
         }
     }
 
