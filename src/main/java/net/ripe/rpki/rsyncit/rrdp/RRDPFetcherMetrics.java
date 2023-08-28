@@ -3,6 +3,7 @@ package net.ripe.rpki.rsyncit.rrdp;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -12,6 +13,8 @@ public final class RRDPFetcherMetrics {
     private final Counter failedUpdates;
     private final Counter timeoutUpdates;
     private final Counter objectFailures;
+
+    public final Timer objectConstructionTimer;
 
     public RRDPFetcherMetrics(MeterRegistry meterRegistry) {
         successfulUpdates = buildCounter("success", meterRegistry);
@@ -25,6 +28,10 @@ public final class RRDPFetcherMetrics {
         Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
             .description("Serial of the RRDP notification.xml at the given URL")
             .register(meterRegistry);
+
+        objectConstructionTimer = Timer.builder("rsyncit.fetcher.parsing")
+                .description("Time spent parsing objects for the last run")
+                .register(meterRegistry);
     }
 
     public void success(int serial) {

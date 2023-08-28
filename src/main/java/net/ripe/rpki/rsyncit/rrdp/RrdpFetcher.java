@@ -210,6 +210,9 @@ public class RrdpFetcher {
         // to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
         // so rounding down to an hour should generate the same timestamps _most of the time_.
         //
+        if (lastModified == null) {
+            log.info("No last-modified header in response: Using current hour as timestamp");
+        }
         var defaultTimestamp = lastModified != null ? lastModified : Instant.now().truncatedTo(ChronoUnit.HOURS);
 
         // This timestamp is only needed for marking objects in the timestamp cache.
@@ -223,8 +226,9 @@ public class RrdpFetcher {
             .mapToObj(publishedObjects::item)
             .toList();
 
-        var t = Time.timed(() -> objectItems
-            .parallelStream()
+        var objects = metrics.objectConstructionTimer.record(() -> objectItems
+            .stream().unordered()
+            .parallel()
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
@@ -241,10 +245,10 @@ public class RrdpFetcher {
                     //
                     // Cache the timestamp per hash do avoid re-parsing every object in the snapshot every time.
                     //
-                    final Instant createAt = state.cacheTimestamps(Sha256.asString(hash), now,
-                        () -> spiceWithHash(getTimestampForObject(objectUri, decoded, defaultTimestamp), hash));
+                    final Instant modificationTime = state.cacheTimestamps(Sha256.asString(hash), now,
+                        () -> incorporateHashInTimestamp(getTimestampForObject(objectUri, decoded, defaultTimestamp), hash));
 
-                    return new RpkiObject(URI.create(objectUri), decoded, createAt);
+                    return new RpkiObject(URI.create(objectUri), decoded, modificationTime);
                 } catch (RuntimeException e) {
                     metrics.badObject();
                     log.error("Cannot decode object data for URI {}\n{}", objectUri, content);
@@ -270,8 +274,7 @@ public class RrdpFetcher {
             })
             .collect(Collectors.toList()));
 
-        var objects = t.getResult();
-        log.info("Constructed {} objects in {}ms", objects.size(), t.getTime());
+        log.info("Parsed {} objects", objects.size());
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
@@ -332,9 +335,9 @@ public class RrdpFetcher {
      * This MAY help for the corner case of objects having second-accuracy timestamps
      * and the timestatmp in seconds being the same for multiple objects.
      */
-    private Instant spiceWithHash(Instant t, byte[] hash) {
-        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000L));
-        return t.truncatedTo(ChronoUnit.SECONDS).plusMillis(ms.longValue());
+    private Instant incorporateHashInTimestamp(Instant t, byte[] hash) {
+        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000_000_000L));
+        return t.truncatedTo(ChronoUnit.SECONDS).plusNanos(ms.longValue());
     }
 
     record NotificationXml(String sessionId, Integer serial, String snapshotUrl, String expectedSnapshotHash) {
