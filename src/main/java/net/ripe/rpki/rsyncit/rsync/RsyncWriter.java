@@ -100,7 +100,7 @@ public class RsyncWriter {
                         try {
                             Files.write(fullPath, o.bytes());
                             // rsync relies on the correct timestamp for fast synchronization
-                            Files.setLastModifiedTime(fullPath, FileTime.from(o.createdAt()));
+                            Files.setLastModifiedTime(fullPath, FileTime.from(o.modificationTime()));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }

@@ -3,6 +3,7 @@ package net.ripe.rpki.rsyncit.rsync;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,13 +45,13 @@ class RsyncWriterTest {
     }
 
     @Test
-    public void testWriteNoObjects() {
-        withRsyncWriter(rsyncWriter -> rsyncWriter.writeObjects(Collections.emptyList()));
+    public void testWriteNoObjects(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> rsyncWriter.writeObjects(Collections.emptyList()));
     }
 
     @Test
-    public void testWriteMultipleObjects() {
-        withRsyncWriter(rsyncWriter -> {
+    public void testWriteMultipleObjects(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
             var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
             var o2 = new RpkiObject(URI.create("rsync://bla.net/path1/b.cer"), someBytes(), Instant.now());
             var o3 = new RpkiObject(URI.create("rsync://bla.net/path1/nested/c.cer"), someBytes(), Instant.now());
@@ -69,13 +70,14 @@ class RsyncWriterTest {
     }
 
     @Test
-    public void testRemoveOldDirectoriesWhenTheyAreOld() {
+    public void testRemoveOldDirectoriesWhenTheyAreOld(@TempDir Path tmpPath) throws Exception {
         final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
             rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
                 new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
             ).collect(Collectors.toList()));
 
         withRsyncWriter(
+            tmpPath,
             // make it ridiculous so that we clean up everything except for the last directory
             config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
             rsyncWriter -> {
@@ -94,13 +96,14 @@ class RsyncWriterTest {
     }
 
     @Test
-    public void testRemoveOldDirectoriesButKeepSomeNumberOfThem() {
+    public void testRemoveOldDirectoriesButKeepSomeNumberOfThem(@TempDir Path tmpDir) throws Exception {
         final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
             rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
                 new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
             ).collect(Collectors.toList()));
 
         withRsyncWriter(
+            tmpDir,
             // make it ridiculous so that we clean up everything except for the last directory
             config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(2),
             rsyncWriter -> {
@@ -121,37 +124,19 @@ class RsyncWriterTest {
         }
     }
 
-    private static void checkFile(Path path, byte[] bytes) {
-        try {
-            final File file = path.toFile();
-            final byte[] readBackBytes = Files.readAllBytes(path);
-            assertThat(file.exists()).isTrue();
-            assertThat(Arrays.equals(bytes, readBackBytes)).isTrue();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    private static void checkFile(Path path, byte[] bytes) throws IOException {
+        final byte[] readBackBytes = Files.readAllBytes(path);
+        assertThat(path.toFile().exists()).isTrue();
+        assertThat(readBackBytes).isEqualTo(bytes);
     }
 
-    static void withRsyncWriter(Function<Config, Config> transformConfig, Consumer<RsyncWriter> actualTest) {
-        Path tmp = null;
-        try {
-            final Config config = defaultConfig();
-            final Path rsyncitDir = Files.createTempDirectory("rsyncit");
-            final Config config1 = config.withRsyncPath(rsyncitDir.toAbsolutePath().toString());
-            tmp = Files.createTempDirectory(Path.of(config1.rsyncPath()), "rsync-writer-test-");
-            final Config config2 = config.withRsyncPath(tmp.toAbsolutePath().toString());
-            actualTest.accept(new RsyncWriter(transformConfig.apply(config2)));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } finally {
-            if (tmp != null) {
-                tmp.toFile().delete();
-            }
-        }
+    static void withRsyncWriter(Path tmpPath, Function<Config, Config> transformConfig, ThrowingConsumer<RsyncWriter> actualTest) throws Exception {
+        final Config config = defaultConfig().withRsyncPath(tmpPath.toString());
+        actualTest.accept(new RsyncWriter(transformConfig.apply(config)));
     }
 
-    static void withRsyncWriter(Consumer<RsyncWriter> actualTest) {
-        withRsyncWriter(Function.identity(), actualTest);
+    static void withRsyncWriter(Path tmpPath, ThrowingConsumer<RsyncWriter> actualTest) throws Exception {
+        withRsyncWriter(tmpPath, Function.identity(), actualTest);
     }
 
     private static final Random random = new Random();
@@ -163,4 +148,7 @@ class RsyncWriterTest {
         return bytes;
     }
 
+    interface ThrowingConsumer<T> {
+        void accept(T t) throws Exception;
+    }
 }

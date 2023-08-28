@@ -5,14 +5,18 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
+@Slf4j
 @Getter
 public class State {
 
@@ -25,14 +29,15 @@ public class State {
     }
 
     // Remove entries that were not mentioned in RRDP repository for a while
-    public synchronized void removeOldObject(Instant cutOffTime) {
-        var hashesToDelete = new ArrayList<>();
-        times.forEach((hash, t) -> {
-            if (t.getLastMentioned().isBefore(cutOffTime)) {
-                hashesToDelete.add(hash);
-            }
-        });
-        hashesToDelete.forEach(times::remove);
+    public void removeOldObject(Instant cutOffTime) {
+        var expired = times.entrySet().stream().filter(entry ->
+            entry.getValue().getLastMentioned().isBefore(cutOffTime)
+        );
+
+        var removed = expired.mapToInt(entry -> Boolean.compare(times.remove(entry.getKey(), entry.getValue()), false));
+        if (log.isInfoEnabled()) {
+            log.debug("Cleaned {} items from timestamp cache", removed.sum());
+        }
     }
 
     public Instant cacheTimestamps(String hash, Instant now, Supplier<Instant> createdAt) {
