@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class RrdpFetcherTest {
@@ -43,8 +44,9 @@ class RrdpFetcherTest {
 
     @Test
     public void testEmptyNotificationXml() {
-        NotificationStructureException exception = assertThrows(NotificationStructureException.class, () -> tryFetch("", null));
-        assertThat(exception.getMessage()).isEqualTo("Empty notification file.");
+        assertThatThrownBy(() -> tryFetch("", null))
+                .isInstanceOf(NotificationStructureException.class)
+                .hasMessage("Empty notification file.");
     }
 
     @Test
@@ -57,8 +59,9 @@ class RrdpFetcherTest {
         final String notificationXml = """
             <notification xmlns="http://www.ripe.net/rpki/rrdp" version="1" session_id="1c33ba5d-4e16-448d-9a22-b12599ef1cba" serial="29861">            
             </notification>""";
-        NotificationStructureException exception = assertThrows(NotificationStructureException.class, () -> tryFetch(notificationXml, null));
-        assertThat(exception.getMessage()).isEqualTo("No snapshot tag in the notification file.");
+        assertThatThrownBy(() -> tryFetch(notificationXml, null))
+                .isInstanceOf(NotificationStructureException.class)
+                .hasMessage("No snapshot tag in the notification file.");
     }
 
     @Test
@@ -68,8 +71,9 @@ class RrdpFetcherTest {
             <snapshot uri="https://host/snapshot1.xml" hash="b6dc8a81fea493c5c7a4314a3a9c5996c96cf94417983c8a92462aaf13d6cac8"/>
             <snapshot uri="https://host/snapshot2.xml" hash="b6dc8a81fea493c5c7a4314a3a9c5996c735234417983c8a92462aaf13d6cac8"/>     
             </notification>""";
-        NotificationStructureException exception = assertThrows(NotificationStructureException.class, () -> tryFetch(notificationXml, null));
-        assertThat(exception.getMessage()).isEqualTo("More than one snapshot tag in the notification file.");
+        assertThatThrownBy(() -> tryFetch(notificationXml, null))
+                .isInstanceOf(NotificationStructureException.class)
+                .hasMessage("More than one snapshot tag in the notification file.");
     }
 
     @Test
@@ -87,9 +91,10 @@ class RrdpFetcherTest {
             <snapshot uri="https://rrdp.paas.rpki.ripe.net/1c33ba5d-4e16-448d-9a22-b12599ef1cba/29861/5d1d7670842dd277/snapshot.xml" hash="770c21936e8129499d4f08698b0f08eadf3610a6624004a179e216d568ac04f5"/>            
             </notification>""";
 
-        SnapshotStructureException exception = assertThrows(SnapshotStructureException.class, () -> tryFetch(notificationXml, snapshotXml));
-        assertThat(exception.getMessage()).isEqualTo(
-            "Structure of snapshot at https://rrdp.paas.rpki.ripe.net/1c33ba5d-4e16-448d-9a22-b12599ef1cba/29861/5d1d7670842dd277/snapshot.xml " +
+        assertThatThrownBy(() -> tryFetch(notificationXml, snapshotXml))
+                .isInstanceOf(SnapshotStructureException.class)
+                .hasMessage(
+                "Structure of snapshot at https://rrdp.paas.rpki.ripe.net/1c33ba5d-4e16-448d-9a22-b12599ef1cba/29861/5d1d7670842dd277/snapshot.xml " +
                 "did not match expected structure: with len(content) = 400 had " +
                 "sha256(content) = 25ffe0eb76860c269e6abdd16ec4eb991008e66de32173b6d3411ab3f6dcf058, " +
                 "expected 770c21936e8129499d4f08698b0f08eadf3610a6624004a179e216d568ac04f5");
@@ -102,8 +107,9 @@ class RrdpFetcherTest {
             <snapshot uri="https:/host/snapshot.xml" hash="770c21936e8129499d4f08698b0f08eadf3610a6624004a179e216d568ac04f5"/>            
             </notification>""";
 
-        SnapshotStructureException exception = assertThrows(SnapshotStructureException.class, () -> tryFetch(notificationXml, ""));
-        assertThat(exception.getMessage()).isEqualTo("Structure of snapshot at https:/host/snapshot.xml did not match expected structure: Empty snapshot");
+        assertThatThrownBy(() -> tryFetch(notificationXml, ""))
+                .isInstanceOf(SnapshotStructureException.class)
+                .hasMessage("Structure of snapshot at https:/host/snapshot.xml did not match expected structure: Empty snapshot");
     }
 
     @Test
@@ -120,7 +126,7 @@ class RrdpFetcherTest {
             </notification>
             """, Sha256.asString(snapshotXml));
 
-        SAXParseException exception = assertThrows(SAXParseException.class, () -> tryFetch(notificationXml, snapshotXml));
+        assertThrows(SAXParseException.class, () -> tryFetch(notificationXml, snapshotXml));
     }
 
     private RrdpFetcher.FetchResult tryFetch(String notificationXml, String snapshotXml) throws NotificationStructureException, XPathExpressionException, IOException, ParserConfigurationException, SAXException {
@@ -128,5 +134,4 @@ class RrdpFetcherTest {
         return fetcher.processNotificationXml(notificationXml.getBytes(StandardCharsets.UTF_8),
             url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Instant.now()));
     }
-
 }

@@ -1,5 +1,6 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
+import com.google.common.annotations.VisibleForTesting;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
@@ -335,7 +336,8 @@ public class RrdpFetcher {
      * This MAY help for the corner case of objects having second-accuracy timestamps
      * and the timestatmp in seconds being the same for multiple objects.
      */
-    private Instant incorporateHashInTimestamp(Instant t, byte[] hash) {
+    @VisibleForTesting
+    public static Instant incorporateHashInTimestamp(Instant t, byte[] hash) {
         final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000_000_000L));
         return t.truncatedTo(ChronoUnit.SECONDS).plusNanos(ms.longValue());
     }
