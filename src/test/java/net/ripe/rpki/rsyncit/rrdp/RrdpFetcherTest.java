@@ -13,6 +13,7 @@ import javax.xml.xpath.XPathExpressionException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
@@ -132,6 +133,6 @@ class RrdpFetcherTest {
     private RrdpFetcher.FetchResult tryFetch(String notificationXml, String snapshotXml) throws NotificationStructureException, XPathExpressionException, IOException, ParserConfigurationException, SAXException {
         var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultWebClient(), new State(), new RRDPFetcherMetrics(new SimpleMeterRegistry()));
         return fetcher.processNotificationXml(notificationXml.getBytes(StandardCharsets.UTF_8),
-            url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Instant.now()));
+            url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Optional.of(Instant.now())));
     }
 }

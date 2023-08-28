@@ -67,13 +67,13 @@ public class RrdpFetcher {
     }
 
     private Downloaded download(String uri, Duration timeout) {
-        var lastModified = new AtomicReference<Instant>(null);
+        var lastModified = new AtomicReference<Optional<Instant>>(Optional.empty());
         var body = httpClient.get().uri(uri).retrieve()
             .toEntity(byte[].class)
             .doOnSuccess(e -> {
                 final long modified = e.getHeaders().getLastModified();
                 if (modified != -1) {
-                    lastModified.set(Instant.ofEpochMilli(modified));
+                    lastModified.set(Optional.of(Instant.ofEpochMilli(modified)));
                 }
             })
             .block(timeout)
@@ -202,19 +202,21 @@ public class RrdpFetcher {
         }
     }
 
-    private ProcessPublishElementResult processPublishElements(Element doc, Instant lastModified) throws XPathExpressionException {
+    private ProcessPublishElementResult processPublishElements(Element doc, Optional<Instant> lastModified) throws XPathExpressionException {
         var queryPublish = XPathFactory.newDefaultInstance().newXPath().compile("/snapshot/publish");
         final NodeList publishedObjects = (NodeList) queryPublish.evaluate(doc, XPathConstants.NODESET);
 
-        // Generate timestamp that will be tracked per object and used as FS modification timestamp.
+        // Generate timestamp that will be tracked per object and used as FS modification timestamp
+        // if no value can be parsed from the object itself.
+        //
         // Use last-modified header from the snapshot if available, otherwise truncate current time
         // to the closest hour -- it is unlikely that different instances will have clocks off by a lot,
         // so rounding down to an hour should generate the same timestamps _most of the time_.
         //
-        if (lastModified == null) {
+        if (lastModified.isEmpty()) {
             log.info("No last-modified header in response: Using current hour as timestamp");
         }
-        var defaultTimestamp = lastModified != null ? lastModified : Instant.now().truncatedTo(ChronoUnit.HOURS);
+        var defaultTimestamp = lastModified.orElse(Instant.now().truncatedTo(ChronoUnit.HOURS));
 
         // This timestamp is only needed for marking objects in the timestamp cache.
         var now = Instant.now();
@@ -362,7 +364,7 @@ public class RrdpFetcher {
     public record Timeout() implements FetchResult {
     }
 
-    public record Downloaded(byte[] content, Instant lastModified) {
+    public record Downloaded(byte[] content, Optional<Instant> lastModified) {
     }
 
     ;
