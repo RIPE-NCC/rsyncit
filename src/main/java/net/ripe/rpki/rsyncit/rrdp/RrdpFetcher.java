@@ -228,8 +228,7 @@ public class RrdpFetcher {
             .toList();
 
         var objects = metrics.objectConstructionTimer.record(() -> objectItems
-            .stream().unordered()
-            .parallel()
+            .parallelStream()
             .map(item -> {
                 var objectUri = item.getAttributes().getNamedItem("uri").getNodeValue();
                 var content = item.getTextContent();
