@@ -339,7 +339,7 @@ public class RrdpFetcher {
      */
     @VisibleForTesting
     public static Instant incorporateHashInTimestamp(Instant t, byte[] hash) {
-        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1000_000_000L));
+        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1_000_000_000L));
         return t.truncatedTo(ChronoUnit.SECONDS).plusNanos(ms.longValue());
     }
 
