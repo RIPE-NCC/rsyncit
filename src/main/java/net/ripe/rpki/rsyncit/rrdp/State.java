@@ -34,9 +34,9 @@ public class State {
             entry.getValue().getLastMentioned().isBefore(cutOffTime)
         );
 
-        var removed = expired.mapToInt(entry -> Boolean.compare(times.remove(entry.getKey(), entry.getValue()), false));
+        var removedCount = expired.filter(entry -> times.remove(entry.getKey(), entry.getValue())).count();
         if (log.isInfoEnabled()) {
-            log.debug("Cleaned {} items from timestamp cache", removed.sum());
+            log.debug("Cleaned {} items from timestamp cache", removedCount);
         }
     }
 
