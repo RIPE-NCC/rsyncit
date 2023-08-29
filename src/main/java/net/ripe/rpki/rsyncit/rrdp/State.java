@@ -32,9 +32,9 @@ public class State {
     public void removeOldObject(Instant cutOffTime) {
         var expired = times.entrySet().stream().filter(entry ->
             entry.getValue().getLastMentioned().isBefore(cutOffTime)
-        );
+        ).toList();
 
-        var removedCount = expired.filter(entry -> times.remove(entry.getKey(), entry.getValue())).count();
+        var removedCount = expired.stream().filter(entry -> times.remove(entry.getKey(), entry.getValue())).count();
         if (log.isInfoEnabled()) {
             log.debug("Cleaned {} items from timestamp cache", removedCount);
         }
