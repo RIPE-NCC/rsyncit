@@ -17,7 +17,7 @@ public class Time {
         long begin = System.nanoTime();
         T t = s.get();
         long end = System.nanoTime();
-        return new Timed<>(t, ((end - begin) + 500000) / 1000000);
+        return new Timed<>(t, ((end - begin) + 500_000) / 1_000_000);
     }
 
     public static long timed(Runnable s) {
