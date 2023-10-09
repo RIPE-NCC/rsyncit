@@ -3,6 +3,7 @@ package net.ripe.rpki.rsyncit.rrdp;
 import com.google.common.annotations.VisibleForTesting;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.ripe.rpki.commons.crypto.cms.GenericRpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.crl.X509Crl;
@@ -289,14 +290,10 @@ public class RrdpFetcher {
                 case Aspa:
                 case Roa:
                 case Gbr:
-                    var signedObjectParser = new RpkiSignedObjectParser() {
-                        public DateTime getPublicSigningTime() {
-                            return getSigningTime();
-                        }
-                    };
+                    var signedObjectParser = new GenericRpkiSignedObjectParser();
 
                     signedObjectParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    yield Instant.ofEpochMilli(signedObjectParser.getPublicSigningTime().getMillis());
+                    yield Instant.ofEpochMilli(signedObjectParser.getSigningTime().getMillis());
                 case Certificate:
                     X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
                     x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
