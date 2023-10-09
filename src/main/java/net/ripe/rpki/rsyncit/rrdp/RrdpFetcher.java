@@ -278,10 +278,6 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    private static Instant extractSigningTime(RpkiSignedObject o) {
-        return Instant.ofEpochMilli(o.getSigningTime().getMillis());
-    }
-
     private Instant getTimestampForObject(final String objectUri, final byte[] decoded, Instant lastModified) {
         final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
