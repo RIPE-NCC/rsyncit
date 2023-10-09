@@ -10,8 +10,6 @@ plugins {
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 
-apply from: "dependencies.gradle"
-
 group = 'net.ripe.rpki'
 version = '0.0.1-SNAPSHOT'
 

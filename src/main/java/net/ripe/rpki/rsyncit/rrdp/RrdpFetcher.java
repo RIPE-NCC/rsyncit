@@ -8,11 +8,11 @@ import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.crl.X509Crl;
 import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
 import net.ripe.rpki.commons.util.RepositoryObjectType;
+import net.ripe.rpki.commons.util.XML;
 import net.ripe.rpki.commons.validation.ValidationResult;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
-import net.ripe.rpki.rsyncit.util.XML;
 import org.joda.time.DateTime;
 import org.springframework.http.HttpRequest;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -128,7 +128,7 @@ public class RrdpFetcher {
         if (notificationBytes == null || notificationBytes.length == 0) {
             throw new NotificationStructureException("Empty notification file.");
         }
-        final DocumentBuilder documentBuilder = XML.newDocumentBuilder();
+        final DocumentBuilder documentBuilder = XML.newNonNamespaceAwareDocumentBuilder();
         final Document notificationXmlDoc = documentBuilder.parse(new ByteArrayInputStream(notificationBytes));
 
         var notification = validateNotificationStructure(notificationXmlDoc);
