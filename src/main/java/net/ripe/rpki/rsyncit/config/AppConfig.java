@@ -5,16 +5,19 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.actuate.info.Info;
+import org.springframework.boot.actuate.info.InfoContributor;
 import org.springframework.boot.info.GitProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.function.Function;
 
 @Component
 @Getter
-public class AppConfig {
+public class AppConfig implements InfoContributor {
 
     private final String rrdpUrl;
     private final String rrdpReplaceHostWith;
@@ -50,6 +53,7 @@ public class AppConfig {
         Gauge.builder("rsyncit.configuration", () -> 1.0)
                 .baseUnit("info")
                 .tag("rrdp_url", rrdpUrl)
+                .tag("rrdp_override_host", rrdpReplaceHostWith)
                 .tag("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()))
                 .tag("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()))
                 .tag("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount))
@@ -78,5 +82,17 @@ public class AppConfig {
     public static ApplicationInfo appInfo(GitProperties gitProperties) {
         return new ApplicationInfo(gitProperties.getShortCommitId());
     }
-
+    @Override
+    public void contribute(Info.Builder builder) {
+        builder.withDetail("config", Map.of(
+            "cron", cron,
+            "rrdp_url", rrdpUrl,
+            "rrdp_replace_host", rrdpReplaceHostWith,
+            "rsync_path", rsyncPath,
+            "request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()),
+            "retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()),
+            "retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount),
+            "build", info.gitCommitId()
+        ));
+    }
 }
