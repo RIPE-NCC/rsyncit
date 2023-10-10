@@ -1,5 +1,8 @@
 package net.ripe.rpki.rsyncit.config;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.GitProperties;
@@ -17,7 +20,7 @@ public class AppConfig {
     private final String rrdpReplaceHostWith;
     private final String rsyncPath;
     private final String cron;
-    private final String requestTimeout;
+    private final Duration requestTimeout;
     private final ApplicationInfo info;
     private final long targetDirectoryRetentionPeriodMs;
     private final int targetDirectoryRetentionCopiesCount;
@@ -28,12 +31,13 @@ public class AppConfig {
                      // Run every 10 minutes
                      @Value("${cron:0 0/10 * * * ?}") String cron,
                      // 3 minutes by default
-                     @Value("${requestTimeout:PT180S}") String requestTimeout,
+                     @Value("${requestTimeout:PT180S}") Duration requestTimeout,
                      // delete rsync directories older than 1 hour
                      @Value("${targetDirectoryRetentionPeriodMs:3600000}") long targetDirectoryRetentionPeriodMs,
                      // do not keep more than 8 copies of rsync directories at once
                      @Value("${targetDirectoryRetentionCopiesCount:8}") int targetDirectoryRetentionCopiesCount,
-                     ApplicationInfo info) {
+                     ApplicationInfo info,
+                     MeterRegistry registry) {
         this.rrdpUrl = rrdpUrl;
         this.rrdpReplaceHostWith = rrdpReplaceHostWith;
         this.rsyncPath = rsyncPath;
@@ -42,10 +46,20 @@ public class AppConfig {
         this.info = info;
         this.targetDirectoryRetentionPeriodMs = targetDirectoryRetentionPeriodMs;
         this.targetDirectoryRetentionCopiesCount = targetDirectoryRetentionCopiesCount;
+
+        Gauge.builder("rsyncit.configuration", () -> 1.0)
+                .baseUnit("info")
+                .tag("rrdp_url", rrdpUrl)
+                .tag("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()))
+                .tag("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()))
+                .tag("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount))
+                .tag("build", info.gitCommitId())
+                .strongReference(true)
+                .register(registry);
     }
 
     public Config getConfig() {
-        return new Config(rrdpUrl, substitutor(rrdpReplaceHostWith), rsyncPath, cron, Duration.parse(requestTimeout),
+        return new Config(rrdpUrl, substitutor(rrdpReplaceHostWith), rsyncPath, cron, requestTimeout,
             targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount);
     }
 
