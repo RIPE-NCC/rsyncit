@@ -1,17 +1,10 @@
 package net.ripe.rpki.rsyncit.rrdp;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.hash.BloomFilter;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import net.ripe.rpki.commons.crypto.cms.RpkiSignedObject;
 import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
-import net.ripe.rpki.commons.crypto.cms.aspa.AspaCmsParser;
-import net.ripe.rpki.commons.crypto.cms.ghostbuster.GhostbustersCmsParser;
-import net.ripe.rpki.commons.crypto.cms.manifest.ManifestCmsParser;
-import net.ripe.rpki.commons.crypto.cms.roa.RoaCmsParser;
-import net.ripe.rpki.commons.crypto.crl.X509Crl;
-import net.ripe.rpki.commons.crypto.x509cert.X509ResourceCertificateParser;
-import net.ripe.rpki.commons.util.RepositoryObjectType;
+import net.ripe.rpki.commons.crypto.util.SignedObjectUtil;
 import net.ripe.rpki.commons.validation.ValidationResult;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
@@ -36,6 +29,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -57,6 +51,17 @@ public class RrdpFetcher {
     private final WebClient httpClient;
     private final State state;
     private final RRDPFetcherMetrics metrics;
+
+    /**
+     * Bloom filter with 0.5% false positives (and no false negatives) at 100K objects to reduce logging.
+     *
+     * Expected number of rejected objects is ~100k worst case, which would leave ~50 false positives that are logged
+     * for each iteration.
+     *
+     * On a realistic number of rejected objects (~9k) this would leave < 10 false positives per update.
+     */
+    private final BloomFilter<String> loggedObjects = BloomFilter.create((from, into) -> into.putString(from, Charset.defaultCharset()), 100_000, 0.05);
+
 
     public RrdpFetcher(Config config, WebClient httpClient, State state, RRDPFetcherMetrics metrics) {
         this.config = config;
@@ -240,15 +245,13 @@ public class RrdpFetcher {
                     // https://www.w3.org/TR/2004/PER-xmlschema-2-20040318/datatypes.html#base64Binary
                     var decoded = decoder.decode(content.trim());
 
-                    var hash = Sha256.asBytes(decoded);
-
-                    // Try to get some creation timestamp from the object itself. If it's impossible to parse
-                    // the object, use the default based on the last-modified header of the snapshot.
                     //
                     // Cache the timestamp per hash do avoid re-parsing every object in the snapshot every time.
                     //
-                    final Instant modificationTime = state.cacheTimestamps(Sha256.asString(hash), now,
-                        () -> incorporateHashInTimestamp(getTimestampForObject(objectUri, decoded, defaultTimestamp), hash));
+                    // We can not use hashes in sub-second precision because rsync may start syncing those by default.
+                    // @see https://github.com/WayneD/rsync/commit/839dbff2aaf0277471e1986a3cd0f869e0bdda24
+                    final Instant modificationTime = state.cacheTimestamps(Sha256.asString(decoded), now,
+                        () -> getTimestampForObject(objectUri, decoded, defaultTimestamp));
 
                     return new RpkiObject(URI.create(objectUri), decoded, modificationTime);
                 } catch (RuntimeException e) {
@@ -280,67 +283,27 @@ public class RrdpFetcher {
         return new ProcessPublishElementResult(objects, collisionCount.get());
     }
 
-    private static Instant extractSigningTime(RpkiSignedObject o) {
-        return Instant.ofEpochMilli(o.getSigningTime().getMillis());
-    }
-
+    /**
+     * Try to get some creation timestamp from the object itself. If it's impossible to parse
+     * the object, use the default (based on the last-modified header of the snapshot).
+     *
+     * @param objectUri uri of object
+     * @param decoded content of object
+     * @param lastModified modification time to use as fallback
+     * @return
+     */
     private Instant getTimestampForObject(final String objectUri, final byte[] decoded, Instant lastModified) {
-        final RepositoryObjectType objectType = RepositoryObjectType.parse(objectUri);
         try {
-            return switch (objectType) {
-                case Certificate -> {
-                    X509ResourceCertificateParser x509CertificateParser = new X509ResourceCertificateParser();
-                    x509CertificateParser.parse(ValidationResult.withLocation(objectUri), decoded);
-                    final var cert = x509CertificateParser.getCertificate().getCertificate();
-                    yield Instant.ofEpochMilli(cert.getNotBefore().getTime());
-                }
-                case Crl -> {
-                    final ValidationResult result = ValidationResult.withLocation(objectUri);
-                    final X509Crl x509Crl = X509Crl.parseDerEncoded(decoded, result);
-                    checkResult(objectUri, result);
-                    yield Instant.ofEpochMilli(x509Crl.getCrl().getThisUpdate().getTime());
-                }
-                case Manifest ->
-                    extractSigningTime(tryParse(new ManifestCmsParser(), objectUri, decoded).getManifestCms());
-                case Aspa ->
-                    extractSigningTime(tryParse(new AspaCmsParser(), objectUri, decoded).getAspa());
-                case Roa ->
-                    extractSigningTime(tryParse(new RoaCmsParser(), objectUri, decoded).getRoaCms());
-                case Gbr ->
-                    extractSigningTime(tryParse(new GhostbustersCmsParser(), objectUri, decoded).getGhostbustersCms());
-                case Unknown ->
-                    lastModified;
-            };
-        } catch (Exception e) {
+            return Instant.ofEpochMilli(SignedObjectUtil.getFileCreationTime(URI.create(objectUri), decoded).getMillis());
+        } catch (SignedObjectUtil.NoTimeParsedException e) {
             metrics.badObject();
-            var encoder = Base64.getEncoder();
-            log.error("Could not parse the object url = {}, body = {} :", objectUri, encoder.encodeToString(decoded), e);
+            var contentHash = Sha256.asString(decoded);
+            if (!loggedObjects.mightContain(contentHash)) {
+                log.error("Could not parse the object url = {}, body = {} :", objectUri, Base64.getEncoder().encodeToString(decoded), e);
+                loggedObjects.put(contentHash);
+            }
             return lastModified;
         }
-    }
-
-    private static <T extends RpkiSignedObjectParser> T tryParse(T parser, final String objectUri, final byte[] decoded) {
-        final ValidationResult result = ValidationResult.withLocation(objectUri);
-        parser.parse(result, decoded);
-        checkResult(objectUri, result);
-        return parser;
-    }
-
-    private static void checkResult(String objectUri, ValidationResult result) {
-        if (result.hasFailures()) {
-            throw new RuntimeException(String.format("Object %s, error %s", objectUri, result.getFailuresForAllLocations()));
-        }
-    }
-
-    /**
-     * Add artificial millisecond offset to the timestamp based on hash of the object.
-     * This MAY help for the corner case of objects having second-accuracy timestamps
-     * and the timestatmp in seconds being the same for multiple objects.
-     */
-    @VisibleForTesting
-    public static Instant incorporateHashInTimestamp(Instant t, byte[] hash) {
-        final BigInteger ms = new BigInteger(hash).mod(BigInteger.valueOf(1_000_000_000L));
-        return t.truncatedTo(ChronoUnit.SECONDS).plusNanos(ms.longValue());
     }
 
     record NotificationXml(String sessionId, Integer serial, String snapshotUrl, String expectedSnapshotHash) {
@@ -366,8 +329,5 @@ public class RrdpFetcher {
 
     public record Downloaded(byte[] content, Optional<Instant> lastModified) {
     }
-
-    ;
-
 }
 
