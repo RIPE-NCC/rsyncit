@@ -1,4 +1,0 @@
-ext {
-    rpki_commons_version = '1.32'
-
-}
