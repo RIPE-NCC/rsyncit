@@ -70,6 +70,20 @@ class RsyncWriterTest {
     }
 
     @Test
+    public void testIgnoreBadUrls(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
+            var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
+            var o2 = new RpkiObject(URI.create("rsync://bla.net/path1/../../PATH_INJECTION.txt"), someBytes(), Instant.now());
+            var o3 = new RpkiObject(URI.create("rsync://bla.net/path1/path2/../NOT_REALLY_PATH_INJECTION.txt"), someBytes(), Instant.now());
+            rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3));
+            final String root = rsyncWriter.getConfig().rsyncPath();
+            checkFile(Paths.get(root, "published", "bla.net", "path1", "a.cer"), o1.bytes());
+            assertThat(Paths.get(root, "published", "PATH_INJECTION.txt").toFile().exists()).isFalse();
+            checkFile(Paths.get(root, "published", "bla.net", "path1", "NOT_REALLY_PATH_INJECTION.txt"), o3.bytes());
+        });
+    }
+
+    @Test
     public void testRemoveOldDirectoriesWhenTheyAreOld(@TempDir Path tmpPath) throws Exception {
         final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
             rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->

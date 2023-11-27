@@ -6,6 +6,7 @@ import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.apache.tomcat.util.http.fileupload.FileUtils;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -16,6 +17,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -68,39 +70,45 @@ public class RsyncWriter {
         final Path temporaryDirectory = Files.createTempDirectory(Paths.get(config.rsyncPath()), "tmp-" + formattedNow + "-");
         try {
             groupedByHost.forEach((hostName, os) -> {
-                // creeate a directory per hostname (in realistic cases there will be just one)
-                var hostDir = temporaryDirectory.resolve(hostName);
+                // create a directory per hostname (in realistic cases there will be just one)
+                var hostBasedPath = temporaryDirectory.resolve(hostName);
                 try {
-                    Files.createDirectories(hostDir);
+                    Files.createDirectories(hostBasedPath);
                 } catch (IOException e) {
-                    log.error("Could not create {}", hostDir);
+                    log.error("Could not create {}", hostBasedPath);
                 }
 
-                // create directories in "shortest first" order
-                os.stream()
-                    .map(o ->
+                // Filter out objects with potentially insecure URLs
+                var wellBehavingObjects = filterOutBadUrls(hostBasedPath, os);
+
+                // Create directories in "shortest first" order.
+                // Use canonical path to avoid potential troubles with relative ".." paths
+                wellBehavingObjects
+                    .stream()
+                    .map(o -> {
                         // remove the filename, i.e. /foo/bar/object.cer -> /foo/bar
-                        Paths.get(relativePath(o.url().getPath())).getParent()
-                    )
+                        var objectParentDir = Paths.get(relativePath(o.url().getPath())).getParent();
+                        return hostBasedPath.resolve(objectParentDir).normalize();
+                    })
                     .sorted()
                     .distinct()
                     .forEach(dir -> {
                         try {
-                            Files.createDirectories(temporaryDirectory.resolve(hostName).resolve(dir));
+                            Files.createDirectories(dir);
                         } catch (IOException ex) {
                             log.error("Could not create directory {}", dir, ex);
                         }
                     });
 
-                fileWriterPool.submit(() -> os.stream()
+                fileWriterPool.submit(() -> wellBehavingObjects.stream()
                     .parallel()
                     .forEach(o -> {
                         var path = Paths.get(relativePath(o.url().getPath()));
-                        var fullPath = temporaryDirectory.resolve(hostName).resolve(path);
                         try {
-                            Files.write(fullPath, o.bytes());
+                            var normalizedPath = hostBasedPath.resolve(path).normalize();
+                            Files.write(normalizedPath, o.bytes());
                             // rsync relies on the correct timestamp for fast synchronization
-                            Files.setLastModifiedTime(fullPath, FileTime.from(o.modificationTime()));
+                            Files.setLastModifiedTime(normalizedPath, FileTime.from(o.modificationTime()));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
@@ -121,6 +129,23 @@ public class RsyncWriter {
             } catch (IOException ignored) {
             }
         }
+    }
+
+    static List<RpkiObject> filterOutBadUrls(Path hostBasedPath, Collection<RpkiObject> objects) {
+        final String normalizedHostPath = hostBasedPath.normalize().toString();
+        return objects.stream().flatMap(object -> {
+            var objectRelativePath = Paths.get(relativePath(object.url().getPath()));
+            // Check that the resulting path of the object stays within `hostBasedPath`
+            // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
+            // writing data outside of the controlled path.
+            final String normalizedPath = hostBasedPath.resolve(objectRelativePath).normalize().toString();
+            if (normalizedPath.startsWith(normalizedHostPath)) {
+                return Stream.of(object);
+            } else {
+                log.error("The object with url {} was skipped.", object.url());
+            }
+            return Stream.empty();
+        }).collect(Collectors.toList());
     }
 
     private void atomicallyReplacePublishedSymlink(Path baseDirectory, Path targetDirectory) throws IOException {
@@ -171,7 +196,7 @@ public class RsyncWriter {
         }
     }
 
-    private String relativePath(final String path) {
+    private static String relativePath(final String path) {
         if (path.startsWith("/")) {
             return path.substring(1);
         }
