@@ -85,15 +85,10 @@ public class RsyncWriter {
                 // Use canonical path to avoid potential troubles with relative ".." paths
                 wellBehavingObjects
                     .stream()
-                    .flatMap(o -> {
+                    .map(o -> {
                         // remove the filename, i.e. /foo/bar/object.cer -> /foo/bar
                         var objectParentDir = Paths.get(relativePath(o.url().getPath())).getParent();
-                        try {
-                            return Stream.of(hostBasedPath.resolve(objectParentDir).toFile().getCanonicalFile().toPath());
-                        } catch (IOException e) {
-                            log.error("Could not find a parent directory for the object {}", o.url(), e);
-                            return Stream.empty();
-                        }
+                        return hostBasedPath.resolve(objectParentDir).normalize();
                     })
                     .sorted()
                     .distinct()
@@ -110,10 +105,10 @@ public class RsyncWriter {
                     .forEach(o -> {
                         var path = Paths.get(relativePath(o.url().getPath()));
                         try {
-                            var canonicalFullPath = hostBasedPath.resolve(path).toFile().getCanonicalFile().toPath();
-                            Files.write(canonicalFullPath, o.bytes());
+                            var normalizedPath = hostBasedPath.resolve(path).normalize();
+                            Files.write(normalizedPath, o.bytes());
                             // rsync relies on the correct timestamp for fast synchronization
-                            Files.setLastModifiedTime(canonicalFullPath, FileTime.from(o.modificationTime()));
+                            Files.setLastModifiedTime(normalizedPath, FileTime.from(o.modificationTime()));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
@@ -137,26 +132,17 @@ public class RsyncWriter {
     }
 
     static List<RpkiObject> filterOutBadUrls(Path hostBasedPath, Collection<RpkiObject> objects) {
-        final String canonicalHostPath;
-        try {
-            canonicalHostPath = hostBasedPath.toFile().getCanonicalPath();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        final String normalizedHostPath = hostBasedPath.normalize().toString();
         return objects.stream().flatMap(object -> {
             var objectRelativePath = Paths.get(relativePath(object.url().getPath()));
-            try {
-                // Check that the resulting path of the object stays within `hostBasedPath`
-                // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
-                // writing data outside of the controlled path.
-                final String canonicalPath = hostBasedPath.resolve(objectRelativePath).toFile().getCanonicalPath();
-                if (canonicalPath.startsWith(canonicalHostPath)) {
-                    return Stream.of(object);
-                } else {
-                    log.error("The object with url {} was skipped.", object.url());
-                }
-            } catch (IOException e) {
-                log.error("The object with url {} was skipped due to the error.", object.url(), e);
+            // Check that the resulting path of the object stays within `hostBasedPath`
+            // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
+            // writing data outside of the controlled path.
+            final String normalizedPath = hostBasedPath.resolve(objectRelativePath).normalize().toString();
+            if (normalizedPath.startsWith(normalizedHostPath)) {
+                return Stream.of(object);
+            } else {
+                log.error("The object with url {} was skipped.", object.url());
             }
             return Stream.empty();
         }).collect(Collectors.toList());
