@@ -11,6 +11,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -99,6 +100,37 @@ class RsyncWriterTest {
     }
 
     @Test
+    public void testDoNotDeleteLinkedDirAndLinksMostRecentlyWritten(@TempDir Path tmpPath) throws Exception {
+        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
+                rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
+                        new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
+                ).collect(Collectors.toList()));
+
+        withRsyncWriter(
+                tmpPath,
+                config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
+                rsyncWriter -> {
+                    var path1 = writeSomeObjects.apply(rsyncWriter);
+                    var path2 = writeSomeObjects.apply(rsyncWriter);
+                    Files.setLastModifiedTime(path1, FileTime.from(Instant.now().plus(1, ChronoUnit.DAYS)));
+                    sleep(1100);
+                    var path3 = writeSomeObjects.apply(rsyncWriter);
+
+                    // path 1 has the mangled timestamp
+                    assertThat(path1.toFile()).exists();
+                    // path 2 is too old
+                    assertThat(path2.toFile()).doesNotExist();
+                    assertThat(path3.toFile()).exists();
+
+                    // published path points MUST exist and MUST link to the last write (not last timestamp).
+                    //
+                    // A race condition that we check for can not be triggered easily.
+                    // idea: time of check - time of use gap: continuously update the timestamp of path3 to be before cutoff
+                    assertThat(tmpPath.resolve("published").toRealPath().toFile()).exists();
+                });
+    }
+
+    @Test
     public void testRemoveOldDirectoriesWhenTheyAreOld(@TempDir Path tmpPath) throws Exception {
         final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
             rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
@@ -111,16 +143,20 @@ class RsyncWriterTest {
             config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
             rsyncWriter -> {
                 var path1 = writeSomeObjects.apply(rsyncWriter);
-                sleep(200);
                 var path2 = writeSomeObjects.apply(rsyncWriter);
-                // path1 should be deleted as old
-                assertThat(Files.exists(path1)).isFalse();
-                assertThat(Files.exists(path2)).isTrue();
-                sleep(200);
+                // base case: Both are present because they are not too old
+                assertThat(path1.toFile()).exists();
+                assertThat(path2.toFile()).exists();
+                assertThat(tmpPath.resolve("published").toRealPath()).isEqualTo(path2.toRealPath());
+                sleep(1100);
                 var path3 = writeSomeObjects.apply(rsyncWriter);
-                // path2 should also be deleted as old
-                assertThat(Files.exists(path2)).isFalse();
-                assertThat(Files.exists(path3)).isTrue();
+                // inductive case: it cleans the older dirs
+                assertThat(path1.toFile()).doesNotExist();
+                assertThat(path2.toFile()).doesNotExist();
+                assertThat(path3.toFile()).exists();
+
+                // published path points to most recent copy
+                assertThat(tmpPath.resolve("published").toRealPath()).isEqualTo(path3.toRealPath());
             });
     }
 
@@ -137,11 +173,16 @@ class RsyncWriterTest {
             config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(2),
             rsyncWriter -> {
                 var path1 = writeSomeObjects.apply(rsyncWriter);
-                sleep(200);
                 var path2 = writeSomeObjects.apply(rsyncWriter);
-                // Nothing should be deleted, because we want to keep more older copies
-                assertThat(Files.exists(path1)).isTrue();
-                assertThat(Files.exists(path2)).isTrue();
+                sleep(1100);
+                var path3 = writeSomeObjects.apply(rsyncWriter);
+                // It should delete the oldest directory
+                assertThat(path1.toFile()).doesNotExist();
+                assertThat(path2.toFile()).exists();
+                assertThat(path3.toFile()).exists();
+
+                // published path points to most recent copy
+                assertThat(tmpDir.resolve("published").toRealPath()).isEqualTo(path3.toRealPath());
             });
     }
 

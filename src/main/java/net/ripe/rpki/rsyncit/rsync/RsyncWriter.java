@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
@@ -156,7 +157,7 @@ public class RsyncWriter {
             var objectRelativePath = Paths.get(relativePath(object.url().getPath()));
             // Check that the resulting path of the object stays within `hostBasedPath`
             // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
-            // writing data outside of the controlled path.
+            // writing data outside the controlled path.
             final String normalizedPath = hostBasedPath.resolve(objectRelativePath).normalize().toString();
             if (normalizedPath.startsWith(normalizedHostPath)) {
                 return Stream.of(object);
@@ -188,6 +189,10 @@ public class RsyncWriter {
     void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
         long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
+        // resolve the published symlink - because we definitely want to keep that copy.
+        // TODO: published dir should be built without string concat, but this is where we are ¯\_(ツ)_/¯
+        var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
+
         try (
             Stream<Path> oldDirectories = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
@@ -195,6 +200,13 @@ public class RsyncWriter {
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
                 .skip(config.targetDirectoryRetentionCopiesCount())
                 .filter((directory) -> getLastModifiedTime(directory).toMillis() < cutoff)
+                .filter(dir -> {
+                    try {
+                        return !dir.toRealPath().equals(actualPublishedDir);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
         ) {
             fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);
