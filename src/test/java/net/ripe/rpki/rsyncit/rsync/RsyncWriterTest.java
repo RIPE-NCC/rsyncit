@@ -14,6 +14,7 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
@@ -30,10 +31,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RsyncWriterTest {
 
     @Test
-    public void testDateFormat() {
+    public void testPublicationDirectoryNaming(@TempDir Path tempDir) {
         Instant now = Instant.now();
-        final String formattedNow = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
-        assertNotNull(formattedNow);
+        Function<Instant, String> format = then -> DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(then);
+
+        var d1 = RsyncWriter.generatePublicationDirectoryPath(tempDir, now);
+        var d2 = RsyncWriter.generatePublicationDirectoryPath(tempDir, now.plus(25, ChronoUnit.HOURS));
+
+        assertThat(d1.startsWith(tempDir));
+        assertThat(d1).isNotEqualTo(d2);
+        // sibling dirs
+        assertThat(d1.getParent()).isEqualTo(d2.getParent());
+
+        assertThat(d1.toString())
+                .contains("published-")
+                .contains(format.apply(now));
+
+        assertThat(d2.toString())
+                .contains(format.apply(now.plus(25, ChronoUnit.HOURS)));
     }
 
     @Test
@@ -59,13 +74,13 @@ class RsyncWriterTest {
             var o5 = new RpkiObject(URI.create("rsync://bla.net/path2/nested1/nested2/e.cer"), someBytes(), Instant.now());
             var o6 = new RpkiObject(URI.create("rsync://different.net/path2/nested1/nested2/e.cer"), someBytes(), Instant.now());
             rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3, o4, o5, o6));
-            final String root = rsyncWriter.getConfig().rsyncPath();
-            checkFile(Paths.get(root, "published", "bla.net", "path1", "a.cer"), o1.bytes());
-            checkFile(Paths.get(root, "published", "bla.net", "path1", "b.cer"), o2.bytes());
-            checkFile(Paths.get(root, "published", "bla.net", "path1", "nested", "c.cer"), o3.bytes());
-            checkFile(Paths.get(root, "published", "bla.net", "path2", "d.cer"), o4.bytes());
-            checkFile(Paths.get(root, "published", "bla.net", "path2", "nested1", "nested2", "e.cer"), o5.bytes());
-            checkFile(Paths.get(root, "published", "different.net", "path2", "nested1", "nested2", "e.cer"), o6.bytes());
+            var root = rsyncWriter.getConfig().rsyncPath();
+            checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
+            checkFile(root.resolve("published/bla.net/path1/b.cer"), o2.bytes());
+            checkFile(root.resolve("published/bla.net/path1/nested/c.cer"), o3.bytes());
+            checkFile(root.resolve("published/bla.net/path2/d.cer"), o4.bytes());
+            checkFile(root.resolve("published/bla.net/path2/nested1/nested2/e.cer"), o5.bytes());
+            checkFile(root.resolve("published/different.net/path2/nested1/nested2/e.cer"), o6.bytes());
         });
     }
 
@@ -76,10 +91,10 @@ class RsyncWriterTest {
             var o2 = new RpkiObject(URI.create("rsync://bla.net/path1/../../PATH_INJECTION.txt"), someBytes(), Instant.now());
             var o3 = new RpkiObject(URI.create("rsync://bla.net/path1/path2/../NOT_REALLY_PATH_INJECTION.txt"), someBytes(), Instant.now());
             rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3));
-            final String root = rsyncWriter.getConfig().rsyncPath();
-            checkFile(Paths.get(root, "published", "bla.net", "path1", "a.cer"), o1.bytes());
-            assertThat(Paths.get(root, "published", "PATH_INJECTION.txt").toFile().exists()).isFalse();
-            checkFile(Paths.get(root, "published", "bla.net", "path1", "NOT_REALLY_PATH_INJECTION.txt"), o3.bytes());
+            var root = rsyncWriter.getConfig().rsyncPath();
+            checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
+            assertThat(root.resolve( "published/PATH_INJECTION.txt").toFile().exists()).isFalse();
+            checkFile(root.resolve( "published/bla.net/path1/NOT_REALLY_PATH_INJECTION.txt"), o3.bytes());
         });
     }
 
@@ -145,7 +160,7 @@ class RsyncWriterTest {
     }
 
     static void withRsyncWriter(Path tmpPath, Function<Config, Config> transformConfig, ThrowingConsumer<RsyncWriter> actualTest) throws Exception {
-        final Config config = defaultConfig().withRsyncPath(tmpPath.toString());
+        final Config config = defaultConfig().withRsyncPath(tmpPath);
         actualTest.accept(new RsyncWriter(transformConfig.apply(config)));
     }
 

@@ -6,7 +6,6 @@ import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.apache.tomcat.util.http.fileupload.FileUtils;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -55,10 +54,9 @@ public class RsyncWriter {
     public Path writeObjects(List<RpkiObject> objects) {
         try {
             final Instant now = Instant.now();
-            var baseDirectory = Paths.get(config.rsyncPath());
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
-            atomicallyReplacePublishedSymlink(Paths.get(config.rsyncPath()), targetDirectory);
-            cleanupOldTargetDirectories(now, baseDirectory);
+            atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
+            cleanupOldTargetDirectories(now, config.rsyncPath());
             return targetDirectory;
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -73,9 +71,7 @@ public class RsyncWriter {
         final Map<String, List<RpkiObject>> groupedByHost =
             objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
 
-        final String formattedNow = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
-
-        final Path temporaryDirectory = Files.createTempDirectory(Paths.get(config.rsyncPath()), "tmp-" + formattedNow + "-");
+        final Path temporaryDirectory = Files.createTempDirectory(config.rsyncPath(), "rsync-writer-tmp");
         try {
             groupedByHost.forEach((hostName, os) -> {
                 // create a directory per hostname (in realistic cases there will be just one)
@@ -131,8 +127,8 @@ public class RsyncWriter {
                         hostName);
             });
 
-            // Calculate target directory after writing phase, to be sure variable is not used beforehand.
-            final Path targetDirectory = Paths.get(config.rsyncPath()).resolve("published-" + formattedNow);
+            // Calculate target directory after writing phase, to be sure it is not used beforehand.
+            final Path targetDirectory = generatePublicationDirectoryPath(config.rsyncPath(), now);
 
             // Directory write is fully complete, rename temporary to target directory name
             Files.setLastModifiedTime(temporaryDirectory, FileTime.from(now));
@@ -146,6 +142,12 @@ public class RsyncWriter {
             } catch (IOException ignored) {
             }
         }
+    }
+
+    static Path generatePublicationDirectoryPath(Path baseDir, Instant now) {
+        var timeSegment = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
+
+        return baseDir.resolve("published-" + timeSegment);
     }
 
     static List<RpkiObject> filterOutBadUrls(Path hostBasedPath, Collection<RpkiObject> objects) {

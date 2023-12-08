@@ -2,6 +2,7 @@ package net.ripe.rpki.rsyncit.config;
 
 import lombok.With;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.Function;
 
@@ -9,7 +10,7 @@ import java.util.function.Function;
 public record Config(
     String rrdpUrl,
     Function<String, String> substituteHost,
-    String rsyncPath,
+    Path rsyncPath,
     String cron,
     Duration requestTimeout,
     long targetDirectoryRetentionPeriodMs,
