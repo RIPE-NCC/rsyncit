@@ -20,7 +20,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ForkJoinPool;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -101,10 +103,7 @@ public class RsyncWriter {
                         .forEach(dir -> {
                             try {
                                 Files.createDirectories(dir);
-                                Files.setPosixFilePermissions(dir, DIRECTORY_PERMISSIONS);
-                                Files.setLastModifiedTime(dir, INTERNAL_DIRECTORY_LAST_MODIFIED_TIME);
                             } catch (IOException e) {
-                                log.error("Could not create directory {}", dir, e);
                                 throw new UncheckedIOException(e);
                             }
                         })
@@ -121,9 +120,24 @@ public class RsyncWriter {
                     }
                 })).join();
 
-                log.info("Wrote {} directories ({} ms) and {} files ({} ms) for host {}",
-                        targetDirectories.size(), t1 - t0,
-                        writableContent.size(), System.currentTimeMillis() - t1,
+                var t2 = System.currentTimeMillis();
+                // Set permissions and modification time on directories
+                try (Stream<Path> paths = Files.walk(hostDirectory)) {
+                    fileWriterPool.submit(() -> paths.parallel().filter(Files::isDirectory).forEach(dir -> {
+                        try {
+                            Files.setPosixFilePermissions(dir, DIRECTORY_PERMISSIONS);
+                            Files.setLastModifiedTime(dir, INTERNAL_DIRECTORY_LAST_MODIFIED_TIME);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    })).join();
+                } catch (IOException e) {
+                    log.error("Could not walk directory {}", hostDirectory, e);
+                    throw new UncheckedIOException(e);
+                }
+
+                log.info("Wrote {} directories ({} ms, mtime/chmod {}ms) and {} files ({} ms) for host {}",
+                        targetDirectories.size(), t1 - t0, System.currentTimeMillis() - t2, writableContent.size(), t2 - t1,
                         hostName);
             });
 
@@ -198,7 +212,7 @@ public class RsyncWriter {
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
                 .skip(config.targetDirectoryRetentionCopiesCount())
-                .filter((directory) -> getLastModifiedTime(directory).toMillis() < cutoff)
+                .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
                 .filter(dir -> {
                     try {
                         return !dir.toRealPath().equals(actualPublishedDir);
@@ -215,6 +229,18 @@ public class RsyncWriter {
                     log.warn("Removing old publication directory {} failed", directory, e);
                 }
             })).join();
+        }
+    }
+
+    public interface IOExceptionThrowingCallable<T> {
+        T call() throws IOException;
+    }
+
+    static <T> T withUncheckedIOException(IOExceptionThrowingCallable<T> callable) {
+        try {
+            return callable.call();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 

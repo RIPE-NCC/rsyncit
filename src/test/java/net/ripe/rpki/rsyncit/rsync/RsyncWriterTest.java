@@ -1,16 +1,15 @@
 package net.ripe.rpki.rsyncit.rsync;
 
+import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -19,17 +18,15 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static net.ripe.rpki.TestDefaults.defaultConfig;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.assertj.core.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Slf4j
 class RsyncWriterTest {
 
     @Test
@@ -83,6 +80,28 @@ class RsyncWriterTest {
             checkFile(root.resolve("published/bla.net/path2/d.cer"), o4.bytes());
             checkFile(root.resolve("published/bla.net/path2/nested1/nested2/e.cer"), o5.bytes());
             checkFile(root.resolve("published/different.net/path2/nested1/nested2/e.cer"), o6.bytes());
+        });
+    }
+
+    @Test
+    public void testWrite_set_time_and_permissions_on_empty_intermediate_paths(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
+            var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
+            var o2 = new RpkiObject(URI.create("rsync://bla.net/path1/nested/empty/dir/tree/c.cer"), someBytes(), Instant.now());
+            var targetDir = rsyncWriter.writeObjects(Arrays.asList(o1, o2), Instant.now());
+
+            var dirCount = new AtomicInteger();
+
+            Files.walk(targetDir).filter(path -> !path.equals(targetDir) && path.toFile().isDirectory()).forEach(path -> {
+                dirCount.incrementAndGet();
+                assertThatCode(() -> {
+                    assertThat(Files.getLastModifiedTime(path)).isEqualTo(RsyncWriter.INTERNAL_DIRECTORY_LAST_MODIFIED_TIME);
+                    assertThat(Files.getPosixFilePermissions(path)).isEqualTo(RsyncWriter.DIRECTORY_PERMISSIONS);
+                })
+                        .doesNotThrowAnyException();
+            });
+
+            assertThat(dirCount.get()).isGreaterThan(5);
         });
     }
 
