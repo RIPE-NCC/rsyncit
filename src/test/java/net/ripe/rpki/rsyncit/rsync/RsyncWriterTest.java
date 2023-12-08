@@ -19,6 +19,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -62,7 +63,7 @@ class RsyncWriterTest {
 
     @Test
     public void testWriteNoObjects(@TempDir Path tmpPath) throws Exception {
-        withRsyncWriter(tmpPath, rsyncWriter -> rsyncWriter.writeObjects(Collections.emptyList()));
+        withRsyncWriter(tmpPath, rsyncWriter -> rsyncWriter.writeObjects(Collections.emptyList(), Instant.now()));
     }
 
     @Test
@@ -74,7 +75,7 @@ class RsyncWriterTest {
             var o4 = new RpkiObject(URI.create("rsync://bla.net/path2/d.cer"), someBytes(), Instant.now());
             var o5 = new RpkiObject(URI.create("rsync://bla.net/path2/nested1/nested2/e.cer"), someBytes(), Instant.now());
             var o6 = new RpkiObject(URI.create("rsync://different.net/path2/nested1/nested2/e.cer"), someBytes(), Instant.now());
-            rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3, o4, o5, o6));
+            rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3, o4, o5, o6), Instant.now());
             var root = rsyncWriter.getConfig().rsyncPath();
             checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
             checkFile(root.resolve("published/bla.net/path1/b.cer"), o2.bytes());
@@ -91,7 +92,7 @@ class RsyncWriterTest {
             var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
             var o2 = new RpkiObject(URI.create("rsync://bla.net/path1/../../PATH_INJECTION.txt"), someBytes(), Instant.now());
             var o3 = new RpkiObject(URI.create("rsync://bla.net/path1/path2/../NOT_REALLY_PATH_INJECTION.txt"), someBytes(), Instant.now());
-            rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3));
+            rsyncWriter.writeObjects(Arrays.asList(o1, o2, o3), Instant.now());
             var root = rsyncWriter.getConfig().rsyncPath();
             checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
             assertThat(root.resolve( "published/PATH_INJECTION.txt").toFile().exists()).isFalse();
@@ -99,22 +100,24 @@ class RsyncWriterTest {
         });
     }
 
+    static Path writeSomeObjects(RsyncWriter writer, Instant then) {
+        return writer.writeObjects(IntStream.range(0, 10).mapToObj(i ->
+            new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
+        ).toList(), then);
+    }
+
     @Test
     public void testDoNotDeleteLinkedDirAndLinksMostRecentlyWritten(@TempDir Path tmpPath) throws Exception {
-        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
-                rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
-                        new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
-                ).collect(Collectors.toList()));
-
         withRsyncWriter(
                 tmpPath,
                 config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
                 rsyncWriter -> {
-                    var path1 = writeSomeObjects.apply(rsyncWriter);
-                    var path2 = writeSomeObjects.apply(rsyncWriter);
+                    Instant t0 = Instant.now();
+
+                    var path1 = writeSomeObjects(rsyncWriter, t0);
+                    var path2 = writeSomeObjects(rsyncWriter, t0.plusMillis(50));
                     Files.setLastModifiedTime(path1, FileTime.from(Instant.now().plus(1, ChronoUnit.DAYS)));
-                    sleep(1100);
-                    var path3 = writeSomeObjects.apply(rsyncWriter);
+                    var path3 = writeSomeObjects(rsyncWriter, t0.plusSeconds(60));
 
                     // path 1 has the mangled timestamp
                     assertThat(path1.toFile()).exists();
@@ -132,24 +135,21 @@ class RsyncWriterTest {
 
     @Test
     public void testRemoveOldDirectoriesWhenTheyAreOld(@TempDir Path tmpPath) throws Exception {
-        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
-            rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
-                new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
-            ).collect(Collectors.toList()));
-
         withRsyncWriter(
             tmpPath,
             // make it ridiculous so that we clean up everything except for the last directory
-            config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(0),
+            config -> config.withTargetDirectoryRetentionPeriodMs(601000).withTargetDirectoryRetentionCopiesCount(0),
             rsyncWriter -> {
-                var path1 = writeSomeObjects.apply(rsyncWriter);
-                var path2 = writeSomeObjects.apply(rsyncWriter);
-                // base case: Both are present because they are not too old
+                var t0 = Instant.now();
+
+                var path1 = writeSomeObjects(rsyncWriter, t0);
+                var path2 = writeSomeObjects(rsyncWriter, t0.plusSeconds(600));
+                // base case: Both are present because they are not too old, one is right at the edge of cutoff.
                 assertThat(path1.toFile()).exists();
                 assertThat(path2.toFile()).exists();
                 assertThat(tmpPath.resolve("published").toRealPath()).isEqualTo(path2.toRealPath());
-                sleep(1100);
-                var path3 = writeSomeObjects.apply(rsyncWriter);
+
+                var path3 = writeSomeObjects(rsyncWriter, t0.plusSeconds(1800));
                 // inductive case: it cleans the older dirs
                 assertThat(path1.toFile()).doesNotExist();
                 assertThat(path2.toFile()).doesNotExist();
@@ -162,20 +162,20 @@ class RsyncWriterTest {
 
     @Test
     public void testRemoveOldDirectoriesButKeepSomeNumberOfThem(@TempDir Path tmpDir) throws Exception {
-        final Function<RsyncWriter, Path> writeSomeObjects = rsyncWriter ->
-            rsyncWriter.writeObjects(IntStream.range(0, 10).mapToObj(i ->
-                new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
-            ).collect(Collectors.toList()));
-
         withRsyncWriter(
             tmpDir,
             // make it ridiculous so that we clean up everything except for the last directory
-            config -> config.withTargetDirectoryRetentionPeriodMs(100).withTargetDirectoryRetentionCopiesCount(2),
+            config -> config.withTargetDirectoryRetentionPeriodMs(300000).withTargetDirectoryRetentionCopiesCount(2),
             rsyncWriter -> {
-                var path1 = writeSomeObjects.apply(rsyncWriter);
-                var path2 = writeSomeObjects.apply(rsyncWriter);
-                sleep(1100);
-                var path3 = writeSomeObjects.apply(rsyncWriter);
+                var t0 = Instant.now();
+
+                var path1 = writeSomeObjects(rsyncWriter, t0);
+                var path2 = writeSomeObjects(rsyncWriter, t0.plusSeconds(600));
+                // Copies are too old, but kept because two are kept.
+                assertThat(path1.toFile()).exists();
+                assertThat(path2.toFile()).exists();
+
+                var path3 = writeSomeObjects(rsyncWriter, t0.plusSeconds(900));
                 // It should delete the oldest directory
                 assertThat(path1.toFile()).doesNotExist();
                 assertThat(path2.toFile()).exists();
@@ -184,14 +184,6 @@ class RsyncWriterTest {
                 // published path points to most recent copy
                 assertThat(tmpDir.resolve("published").toRealPath()).isEqualTo(path3.toRealPath());
             });
-    }
-
-    private static void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static void checkFile(Path path, byte[] bytes) throws IOException {

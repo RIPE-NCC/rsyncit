@@ -52,9 +52,8 @@ public class RsyncWriter {
         this.config = config;
     }
 
-    public Path writeObjects(List<RpkiObject> objects) {
+    public Path writeObjects(List<RpkiObject> objects, Instant now) {
         try {
-            final Instant now = Instant.now();
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
             atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
             cleanupOldTargetDirectories(now, config.rsyncPath());
