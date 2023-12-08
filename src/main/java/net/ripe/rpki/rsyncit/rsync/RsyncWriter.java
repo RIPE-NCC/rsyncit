@@ -127,7 +127,7 @@ public class RsyncWriter {
                         hostName);
             });
 
-            // Calculate target directory after writing phase, to be sure it is not used beforehand.
+            // Init target directory variable after writing phase, to be sure can not be used in another scope.
             final Path targetDirectory = generatePublicationDirectoryPath(config.rsyncPath(), now);
 
             // Directory write is fully complete, rename temporary to target directory name
@@ -189,7 +189,7 @@ public class RsyncWriter {
         long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
         // resolve the published symlink - because we definitely want to keep that copy.
-        // TODO: published dir should be built without string concat, but this is where we are ¯\_(ツ)_/¯
+        // TODO: published dir should be a config attribute instead of relative resolve w/ string, but this is where we are ¯\_(ツ)_/¯
         var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
 
         try (
