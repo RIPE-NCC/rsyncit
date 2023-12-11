@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
@@ -20,9 +19,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ForkJoinPool;
-import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -229,18 +226,6 @@ public class RsyncWriter {
                     log.warn("Removing old publication directory {} failed", directory, e);
                 }
             })).join();
-        }
-    }
-
-    public interface IOExceptionThrowingCallable<T> {
-        T call() throws IOException;
-    }
-
-    static <T> T withUncheckedIOException(IOExceptionThrowingCallable<T> callable) {
-        try {
-            return callable.call();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 
