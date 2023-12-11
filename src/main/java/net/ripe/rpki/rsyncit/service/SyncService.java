@@ -53,7 +53,7 @@ public class SyncService {
             log.info("Updated RRDP state to session_id {} and serial {}", success.sessionId(), success.serial());
 
             var rsyncWriter = new RsyncWriter(config);
-            var r = Time.timed(() -> rsyncWriter.writeObjects(success.objects()));
+            var r = Time.timed(() -> rsyncWriter.writeObjects(success.objects(), Instant.now()));
             log.info("Wrote objects to {} in {}ms", r.getResult(), r.getTime());
 
             state.getRrdpState().markInSync();

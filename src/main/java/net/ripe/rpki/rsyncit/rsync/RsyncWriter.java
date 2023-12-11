@@ -6,21 +6,19 @@ import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
 import org.apache.tomcat.util.http.fileupload.FileUtils;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ForkJoinPool;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -36,6 +34,14 @@ public class RsyncWriter {
     // directory names (`tmp-2021-04-26T10:09:06.023Z-4352054854289820810`).
     public static final Pattern PUBLICATION_DIRECTORY_PATTERN = Pattern.compile("^(tmp|published)-\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d+(-\\d+)?$");
 
+    // Internal directories (used to store all the RPKI objects per CA, etc) are set to this modification time so
+    // that rsync does not see the directories as modified every time we fully write the repository. The RPKI objects
+    // have their creation time as last modified time, so rsync will copy these as needed.
+    public static final FileTime INTERNAL_DIRECTORY_LAST_MODIFIED_TIME = FileTime.fromMillis(0);
+    public static final Set<PosixFilePermission> FILE_PERMISSIONS = PosixFilePermissions.fromString("rw-r--r--");
+    public static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = PosixFilePermissions.fromString("rwxr-xr-x");
+
+
     private final ForkJoinPool fileWriterPool = new ForkJoinPool(2 * Runtime.getRuntime().availableProcessors());
 
     @Getter
@@ -45,18 +51,18 @@ public class RsyncWriter {
         this.config = config;
     }
 
-    public Path writeObjects(List<RpkiObject> objects) {
+    public Path writeObjects(List<RpkiObject> objects, Instant now) {
         try {
-            final Instant now = Instant.now();
-            var baseDirectory = Paths.get(config.rsyncPath());
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
-            atomicallyReplacePublishedSymlink(Paths.get(config.rsyncPath()), targetDirectory);
-            cleanupOldTargetDirectories(now, baseDirectory);
+            atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
+            cleanupOldTargetDirectories(now, config.rsyncPath());
             return targetDirectory;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
+
+    record ObjectTarget(Path targetPath, byte[] content, FileTime modificationTime){}
 
     private Path writeObjectToNewDirectory(List<RpkiObject> objects, Instant now) throws IOException {
         // Since we don't know anything about URLs of the objects
@@ -64,65 +70,83 @@ public class RsyncWriter {
         final Map<String, List<RpkiObject>> groupedByHost =
             objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
 
-        final String formattedNow = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
-
-        final Path targetDirectory = Paths.get(config.rsyncPath()).resolve("published-" + formattedNow);
-        final Path temporaryDirectory = Files.createTempDirectory(Paths.get(config.rsyncPath()), "tmp-" + formattedNow + "-");
+        final Path temporaryDirectory = Files.createTempDirectory(config.rsyncPath(), "rsync-writer-tmp");
         try {
             groupedByHost.forEach((hostName, os) -> {
                 // create a directory per hostname (in realistic cases there will be just one)
-                var hostBasedPath = temporaryDirectory.resolve(hostName);
-                try {
-                    Files.createDirectories(hostBasedPath);
-                } catch (IOException e) {
-                    log.error("Could not create {}", hostBasedPath);
-                }
+                var hostDirectory = temporaryDirectory.resolve(hostName);
+                var hostUrl = URI.create("rsync://" + hostName);
 
-                // Filter out objects with potentially insecure URLs
-                var wellBehavingObjects = filterOutBadUrls(hostBasedPath, os);
+                // Gather the relative paths of files with legal names
+                var writableContent = filterOutBadUrls(hostDirectory, os).stream()
+                        .map(rpkiObject -> {
+                            var relativeUriPath = hostUrl.relativize(rpkiObject.url()).getPath();
+                            var targetPath = hostDirectory.resolve(relativeUriPath).normalize();
 
-                // Create directories in "shortest first" order.
-                // Use canonical path to avoid potential troubles with relative ".." paths
-                wellBehavingObjects
-                    .stream()
-                    .map(o -> {
-                        // remove the filename, i.e. /foo/bar/object.cer -> /foo/bar
-                        var objectParentDir = Paths.get(relativePath(o.url().getPath())).getParent();
-                        return hostBasedPath.resolve(objectParentDir).normalize();
-                    })
-                    .sorted()
-                    .distinct()
-                    .forEach(dir -> {
+                            assert targetPath.normalize().startsWith(hostDirectory.normalize());
+
+                            return new ObjectTarget(targetPath, rpkiObject.bytes(), FileTime.from(rpkiObject.modificationTime()));
+                        }).toList();
+
+                // Create directories
+                // Since createDirectories is idempotent, we do not worry about the order in which it is actually
+                // executed. However, we do want a stable sort for .distinct()
+                var targetDirectories = writableContent.stream().map(o -> o.targetPath.getParent())
+                        .sorted(Comparator.comparing(Path::getNameCount).thenComparing(Path::toString))
+                        .distinct().toList();
+
+                var t0 = System.currentTimeMillis();
+                fileWriterPool.submit(() -> targetDirectories.parallelStream()
+                        .forEach(dir -> {
+                            try {
+                                Files.createDirectories(dir);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        })
+                ).join();
+
+                var t1 = System.currentTimeMillis();
+                fileWriterPool.submit(() -> writableContent.parallelStream().forEach(content -> {
+                    try {
+                        Files.write(content.targetPath, content.content);
+                        Files.setPosixFilePermissions(content.targetPath, FILE_PERMISSIONS);
+                        Files.setLastModifiedTime(content.targetPath, content.modificationTime);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                })).join();
+
+                var t2 = System.currentTimeMillis();
+                // Set permissions and modification time on directories
+                try (Stream<Path> paths = Files.walk(hostDirectory)) {
+                    fileWriterPool.submit(() -> paths.parallel().filter(Files::isDirectory).forEach(dir -> {
                         try {
-                            Files.createDirectories(dir);
-                        } catch (IOException ex) {
-                            log.error("Could not create directory {}", dir, ex);
-                        }
-                    });
-
-                fileWriterPool.submit(() -> wellBehavingObjects.stream()
-                    .parallel()
-                    .forEach(o -> {
-                        var path = Paths.get(relativePath(o.url().getPath()));
-                        try {
-                            var normalizedPath = hostBasedPath.resolve(path).normalize();
-                            Files.write(normalizedPath, o.bytes());
-                            // rsync relies on the correct timestamp for fast synchronization
-                            Files.setLastModifiedTime(normalizedPath, FileTime.from(o.modificationTime()));
+                            Files.setPosixFilePermissions(dir, DIRECTORY_PERMISSIONS);
+                            Files.setLastModifiedTime(dir, INTERNAL_DIRECTORY_LAST_MODIFIED_TIME);
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
-                    })
-                ).join();
+                    })).join();
+                } catch (IOException e) {
+                    log.error("Could not walk directory {}", hostDirectory, e);
+                    throw new UncheckedIOException(e);
+                }
+
+                log.info("Wrote {} directories ({} ms, mtime/chmod {}ms) and {} files ({} ms) for host {}",
+                        targetDirectories.size(), t1 - t0, System.currentTimeMillis() - t2, writableContent.size(), t2 - t1,
+                        hostName);
             });
+
+            // Init target directory variable after writing phase, to be sure can not be used in another scope.
+            final Path targetDirectory = generatePublicationDirectoryPath(config.rsyncPath(), now);
 
             // Directory write is fully complete, rename temporary to target directory name
             Files.setLastModifiedTime(temporaryDirectory, FileTime.from(now));
-            Files.setPosixFilePermissions(temporaryDirectory, PosixFilePermissions.fromString("rwxr-xr-x"));
+            Files.setPosixFilePermissions(temporaryDirectory, DIRECTORY_PERMISSIONS);
             Files.move(temporaryDirectory, targetDirectory, ATOMIC_MOVE);
 
             return targetDirectory;
-
         } finally {
             try {
                 FileUtils.deleteDirectory(temporaryDirectory.toFile());
@@ -131,13 +155,19 @@ public class RsyncWriter {
         }
     }
 
+    static Path generatePublicationDirectoryPath(Path baseDir, Instant now) {
+        var timeSegment = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
+
+        return baseDir.resolve("published-" + timeSegment);
+    }
+
     static List<RpkiObject> filterOutBadUrls(Path hostBasedPath, Collection<RpkiObject> objects) {
         final String normalizedHostPath = hostBasedPath.normalize().toString();
         return objects.stream().flatMap(object -> {
             var objectRelativePath = Paths.get(relativePath(object.url().getPath()));
             // Check that the resulting path of the object stays within `hostBasedPath`
             // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
-            // writing data outside of the controlled path.
+            // writing data outside the controlled path.
             final String normalizedPath = hostBasedPath.resolve(objectRelativePath).normalize().toString();
             if (normalizedPath.startsWith(normalizedHostPath)) {
                 return Stream.of(object);
@@ -169,13 +199,24 @@ public class RsyncWriter {
     void cleanupOldTargetDirectories(Instant now, Path baseDirectory) throws IOException {
         long cutoff = now.toEpochMilli() - config.targetDirectoryRetentionPeriodMs();
 
+        // resolve the published symlink - because we definitely want to keep that copy.
+        // TODO: published dir should be a config attribute instead of relative resolve w/ string, but this is where we are ¯\_(ツ)_/¯
+        var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
+
         try (
             Stream<Path> oldDirectories = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
                 .skip(config.targetDirectoryRetentionCopiesCount())
-                .filter((directory) -> getLastModifiedTime(directory).toMillis() < cutoff)
+                .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
+                .filter(dir -> {
+                    try {
+                        return !dir.toRealPath().equals(actualPublishedDir);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
         ) {
             fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);

@@ -11,6 +11,7 @@ import org.springframework.boot.info.GitProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.Function;
@@ -21,7 +22,7 @@ public class AppConfig implements InfoContributor {
 
     private final String rrdpUrl;
     private final String rrdpReplaceHostWith;
-    private final String rsyncPath;
+    private final Path rsyncPath;
     private final String cron;
     private final Duration requestTimeout;
     private final ApplicationInfo info;
@@ -30,7 +31,7 @@ public class AppConfig implements InfoContributor {
 
     public AppConfig(@Value("${rrdpUrl}") String rrdpUrl,
                      @Value("${rrdpReplaceHost:}") String rrdpReplaceHostWith,
-                     @Value("${rsyncPath}") String rsyncPath,
+                     @Value("${rsyncPath}") Path rsyncPath,
                      // Run every 10 minutes
                      @Value("${cron:0 0/10 * * * ?}") String cron,
                      // 3 minutes by default
