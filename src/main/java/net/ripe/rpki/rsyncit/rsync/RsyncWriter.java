@@ -63,7 +63,7 @@ public class RsyncWriter {
                 // Cleanup old directories even (and especially) if writing objects failed
                 cleanupOldTargetDirectories(now, config.rsyncPath());
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw new RuntimeException("Failed to cleanup old target directories in path: " + config.rsyncPath(), e);
             }
         }
     }
