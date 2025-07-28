@@ -55,10 +55,16 @@ public class RsyncWriter {
         try {
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
             atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
-            cleanupOldTargetDirectories(now, config.rsyncPath());
             return targetDirectory;
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            try {
+                // Cleanup old directories even (and especially) if writing objects failed
+                cleanupOldTargetDirectories(now, config.rsyncPath());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
