@@ -205,6 +205,19 @@ class RsyncWriterTest {
             });
     }
 
+    @Test
+    public void testRemoveOldDirectoriesBuDontDeleteCurrent(@TempDir Path tmpDir) throws Exception {
+        withRsyncWriter(
+            tmpDir,
+            // make it even more ridiculous so that we try to delete everything
+            config -> config.withTargetDirectoryRetentionPeriodMs(10).withTargetDirectoryRetentionCopiesCount(0),
+            rsyncWriter -> {
+                writeSomeObjects(rsyncWriter, Instant.now());
+                // published should never be deleted
+                assertThat(tmpDir.resolve("published").toRealPath()).exists();
+            });
+    }
+
     private static void checkFile(Path path, byte[] bytes) throws IOException {
         final byte[] readBackBytes = Files.readAllBytes(path);
         assertThat(path.toFile().exists()).isTrue();

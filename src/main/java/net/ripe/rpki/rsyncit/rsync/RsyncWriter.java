@@ -204,7 +204,7 @@ public class RsyncWriter {
         var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
 
         try (
-            Stream<Path> oldDirectories = Files.list(baseDirectory)
+            Stream<Path> oldDirectoriesToDelete = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
@@ -218,7 +218,7 @@ public class RsyncWriter {
                     }
                 });
         ) {
-            fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
+            fileWriterPool.submit(() -> oldDirectoriesToDelete.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);
                 try {
                     FileUtils.deleteDirectory(directory.toFile());
