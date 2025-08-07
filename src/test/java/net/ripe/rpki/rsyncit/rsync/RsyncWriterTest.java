@@ -206,7 +206,7 @@ class RsyncWriterTest {
     }
 
     @Test
-    public void testRemoveOldDirectoriesBuDontDeleteCurrent(@TempDir Path tmpDir) throws Exception {
+    public void testRemoveOldDirectoriesButDontDeleteCurrent(@TempDir Path tmpDir) throws Exception {
         withRsyncWriter(
             tmpDir,
             // make it even more ridiculous so that we try to delete everything
