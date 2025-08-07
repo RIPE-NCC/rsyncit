@@ -203,12 +203,14 @@ public class RsyncWriter {
         // TODO: published dir should be a config attribute instead of relative resolve w/ string, but this is where we are ¯\_(ツ)_/¯
         var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
 
+        // skip at least 1 directory regardless of the settings
+        int skipCount = Math.max(config.targetDirectoryRetentionCopiesCount(), 1);
         try (
-            Stream<Path> oldDirectories = Files.list(baseDirectory)
+            Stream<Path> oldDirectoriesToDelete = Files.list(baseDirectory)
                 .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
                 .filter(Files::isDirectory)
                 .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
-                .skip(config.targetDirectoryRetentionCopiesCount())
+                .skip(skipCount)
                 .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
                 .filter(dir -> {
                     try {
@@ -218,7 +220,7 @@ public class RsyncWriter {
                     }
                 });
         ) {
-            fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
+            fileWriterPool.submit(() -> oldDirectoriesToDelete.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);
                 try {
                     FileUtils.deleteDirectory(directory.toFile());
