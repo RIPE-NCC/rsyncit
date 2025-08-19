@@ -51,30 +51,25 @@ public class RsyncWriter {
         this.config = config;
     }
 
-    public Path writeObjects(List<RpkiObject> objects, Instant now) {
+    public Path writeObjects(List<RpkiObject> objects, Instant now) throws IOException {
         try {
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
             atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
             return targetDirectory;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         } finally {
-            try {
-                // Cleanup old directories even (and especially) if writing objects failed
-                cleanupOldTargetDirectories(now, config.rsyncPath());
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to cleanup old target directories in path: " + config.rsyncPath(), e);
-            }
+            // Cleanup old directories even (and especially) if writing objects failed
+            cleanupOldTargetDirectories(now, config.rsyncPath());
         }
     }
 
-    record ObjectTarget(Path targetPath, byte[] content, FileTime modificationTime){}
+    record ObjectTarget(Path targetPath, byte[] content, FileTime modificationTime) {
+    }
 
     private Path writeObjectToNewDirectory(List<RpkiObject> objects, Instant now) throws IOException {
         // Since we don't know anything about URLs of the objects
         // they are grouped by the host name of the URL
         final Map<String, List<RpkiObject>> groupedByHost =
-            objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
+                objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
 
         final Path temporaryDirectory = Files.createTempDirectory(config.rsyncPath(), "rsync-writer-tmp");
         try {
@@ -210,19 +205,19 @@ public class RsyncWriter {
         var actualPublishedDir = config.rsyncPath().resolve("published").toRealPath();
 
         try (
-            Stream<Path> oldDirectories = Files.list(baseDirectory)
-                .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
-                .filter(Files::isDirectory)
-                .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
-                .skip(config.targetDirectoryRetentionCopiesCount())
-                .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
-                .filter(dir -> {
-                    try {
-                        return !dir.toRealPath().equals(actualPublishedDir);
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                });
+                Stream<Path> oldDirectories = Files.list(baseDirectory)
+                        .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
+                        .filter(Files::isDirectory)
+                        .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
+                        .skip(config.targetDirectoryRetentionCopiesCount())
+                        .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
+                        .filter(dir -> {
+                            try {
+                                return !dir.toRealPath().equals(actualPublishedDir);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
         ) {
             fileWriterPool.submit(() -> oldDirectories.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);

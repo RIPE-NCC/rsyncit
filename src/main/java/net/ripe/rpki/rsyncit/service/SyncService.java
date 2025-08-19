@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
@@ -53,7 +54,13 @@ public class SyncService {
             log.info("Updated RRDP state to session_id {} and serial {}", success.sessionId(), success.serial());
 
             var rsyncWriter = new RsyncWriter(config);
-            var r = Time.timed(() -> rsyncWriter.writeObjects(success.objects(), Instant.now()));
+            var r = Time.timed(() -> {
+                try {
+                    return rsyncWriter.writeObjects(success.objects(), Instant.now());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
             log.info("Wrote objects to {} in {}ms", r.getResult(), r.getTime());
 
             state.getRrdpState().markInSync();
