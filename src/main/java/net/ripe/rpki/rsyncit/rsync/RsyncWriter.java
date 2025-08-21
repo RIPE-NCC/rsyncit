@@ -51,24 +51,25 @@ public class RsyncWriter {
         this.config = config;
     }
 
-    public Path writeObjects(List<RpkiObject> objects, Instant now) {
+    public Path writeObjects(List<RpkiObject> objects, Instant now) throws IOException {
         try {
             final Path targetDirectory = writeObjectToNewDirectory(objects, now);
             atomicallyReplacePublishedSymlink(config.rsyncPath(), targetDirectory);
-            cleanupOldTargetDirectories(now, config.rsyncPath());
             return targetDirectory;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } finally {
+            // Cleanup old directories even (and especially) if writing objects failed
+            cleanupOldTargetDirectories(now, config.rsyncPath());
         }
     }
 
-    record ObjectTarget(Path targetPath, byte[] content, FileTime modificationTime){}
+    record ObjectTarget(Path targetPath, byte[] content, FileTime modificationTime) {
+    }
 
     private Path writeObjectToNewDirectory(List<RpkiObject> objects, Instant now) throws IOException {
         // Since we don't know anything about URLs of the objects
         // they are grouped by the host name of the URL
         final Map<String, List<RpkiObject>> groupedByHost =
-            objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
+                objects.stream().collect(Collectors.groupingBy(o -> o.url().getHost()));
 
         final Path temporaryDirectory = Files.createTempDirectory(config.rsyncPath(), "rsync-writer-tmp");
         try {
@@ -218,7 +219,7 @@ public class RsyncWriter {
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
-                });
+                })
         ) {
             fileWriterPool.submit(() -> oldDirectoriesToDelete.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);

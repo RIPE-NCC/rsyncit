@@ -119,7 +119,7 @@ class RsyncWriterTest {
         });
     }
 
-    static Path writeSomeObjects(RsyncWriter writer, Instant then) {
+    static Path writeSomeObjects(RsyncWriter writer, Instant then) throws IOException {
         return writer.writeObjects(IntStream.range(0, 10).mapToObj(i ->
             new RpkiObject(URI.create("rsync://bla.net/path1/" + i + ".cer"), someBytes(), Instant.now())
         ).toList(), then);
