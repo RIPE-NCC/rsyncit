@@ -207,19 +207,19 @@ public class RsyncWriter {
         // skip at least 1 directory regardless of the settings
         int skipCount = Math.max(config.targetDirectoryRetentionCopiesCount(), 1);
         try (
-            Stream<Path> oldDirectories = Files.list(baseDirectory)
-                    .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
-                    .filter(Files::isDirectory)
-                    .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
-                    .skip(skipCount)
-                    .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
-                    .filter(dir -> {
-                        try {
-                            return !dir.toRealPath().equals(actualPublishedDir);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    })
+            Stream<Path> oldDirectoriesToDelete = Files.list(baseDirectory)
+                .filter(path -> PUBLICATION_DIRECTORY_PATTERN.matcher(path.getFileName().toString()).matches())
+                .filter(Files::isDirectory)
+                .sorted(Comparator.comparing(this::getLastModifiedTime).reversed())
+                .skip(skipCount)
+                .filter(directory -> getLastModifiedTime(directory).toMillis() < cutoff)
+                .filter(dir -> {
+                    try {
+                        return !dir.toRealPath().equals(actualPublishedDir);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                })
         ) {
             fileWriterPool.submit(() -> oldDirectoriesToDelete.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);
