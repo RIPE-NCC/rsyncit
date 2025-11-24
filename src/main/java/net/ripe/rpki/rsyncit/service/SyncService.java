@@ -44,9 +44,7 @@ public class SyncService {
         if (isRunning) {
             log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
             metrics.tooSlow();
-            return;
-        }
-        if (!isRunning) {
+        } else {
             try {
                 isRunning = true;
                 doSync();
