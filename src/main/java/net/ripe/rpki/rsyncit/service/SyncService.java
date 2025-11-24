@@ -27,6 +27,7 @@ public class SyncService {
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
+    private boolean isRunning = false;
 
     @Autowired
     public SyncService(WebClient webClient,
@@ -39,6 +40,20 @@ public class SyncService {
     }
 
     public void sync() {
+        if (isRunning) {
+            log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
+            metrics.tooSlow();
+            return;
+        }
+        try {
+            isRunning = true;
+            doSync();
+        } finally {
+            isRunning = false;
+        }
+    }
+
+    private synchronized void doSync() {
         var config = appConfig.getConfig();
         var rrdpFetcher = new RrdpFetcher(config, webClient, state, metrics);
 
