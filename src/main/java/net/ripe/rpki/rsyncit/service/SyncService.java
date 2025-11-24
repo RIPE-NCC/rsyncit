@@ -41,13 +41,12 @@ public class SyncService {
 
     public void sync() {
         // Do not mutate isRunning here, do it inside the try block
-        boolean shouldRun = !isRunning;
         if (isRunning) {
             log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
             metrics.tooSlow();
             return;
         }
-        if (shouldRun) {
+        if (!isRunning) {
             try {
                 isRunning = true;
                 doSync();
