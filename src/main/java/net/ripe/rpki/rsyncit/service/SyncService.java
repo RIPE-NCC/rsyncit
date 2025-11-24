@@ -57,7 +57,7 @@ public class SyncService {
         }
     }
 
-    private synchronized void doSync() {
+    private void doSync() {
         var config = appConfig.getConfig();
         var rrdpFetcher = new RrdpFetcher(config, webClient, state, metrics);
 
