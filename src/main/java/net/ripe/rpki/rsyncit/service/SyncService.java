@@ -17,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Component
@@ -27,7 +28,7 @@ public class SyncService {
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
-    private boolean isRunning = false;
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     @Autowired
     public SyncService(WebClient webClient,
@@ -40,16 +41,15 @@ public class SyncService {
     }
 
     public void sync() {
-        if (isRunning) {
+        if (!isRunning.compareAndSet(false, true)) {
             log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
             metrics.tooSlow();
             return;
         }
         try {
-            isRunning = true;
             doSync();
         } finally {
-            isRunning = false;
+            isRunning.set(false);
         }
     }
 
@@ -59,6 +59,7 @@ public class SyncService {
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
+
         switch (fetchResult) {
             case RrdpFetcher.NoUpdates noUpdates -> noUpdates(noUpdates);
             case RrdpFetcher.SuccessfulFetch success -> onSuccess(success, t, config);
