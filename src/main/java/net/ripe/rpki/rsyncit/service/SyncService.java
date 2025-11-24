@@ -17,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Component
@@ -27,7 +28,7 @@ public class SyncService {
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
-    private volatile boolean isRunning = false;
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     @Autowired
     public SyncService(WebClient webClient,
@@ -40,15 +41,20 @@ public class SyncService {
     }
 
     public void sync() {
-        if (isRunning) {
-            log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
-            metrics.tooSlow();
-        } else {
-            try {
-                isRunning = true;
+        boolean shouldRun = true;
+        try {
+            shouldRun = isRunning.compareAndSet(false, true);
+            if (shouldRun) {
                 doSync();
-            } finally {
-                isRunning = false;
+            } else {
+                log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
+                metrics.tooSlow();
+            }
+        } finally {
+            if (shouldRun) {
+                // shouldRun is true by default to prevent the service to get stuck in the "running" state.
+                // So if this thread was interrupted before "compareAndSet", we reset it to "not running".
+                isRunning.set(false);
             }
         }
     }
