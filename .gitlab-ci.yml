@@ -52,7 +52,7 @@ variables:
   TERM: dumb
 
 default:
-  image: gradle:9-jdk25-noble
+  image: gradle:8.14-jdk21
   before_script:
     - apt-get update &&  apt-get install --yes --no-install-recommends docker.io
 
