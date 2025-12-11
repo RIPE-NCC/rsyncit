@@ -87,7 +87,7 @@ test:
     - build
   script:
     - gradle check
-    - cat build/reports/jacoco/test/html/index.html
+    - cat ./build/reports/tests/test/index.html
   artifacts:
     when: on_failure
     paths:
