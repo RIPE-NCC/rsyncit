@@ -246,7 +246,7 @@ deploy:production:
     TARGET_TAG: production
   environment:
     name: production
-    url: https://rsyncit-1.rpki.prepdev.ripe.net:8080/actuator/info
+    url: http://rsyncit-1.rpki.ripe.net:8080/actuator/info
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: never
