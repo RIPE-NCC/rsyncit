@@ -220,18 +220,15 @@ release:latest:
 deploy:prepdev:
   <<: *salt-container-deploy
   needs: ["build:image"]
-  parallel:
-    matrix:
-      - TARGET_HOST: rsyncit-1.rpki.prepdev.ripe.net
-      - TARGET_HOST: rsyncit-2.rpki.prepdev.ripe.net
   variables:
     IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
     TARGET_CONTAINER: rsyncit
     READINESS_URL: http://127.0.0.1:8080/actuator/info
     TARGET_TAG: prepdev
+    TARGET_HOST: rsyncit-*.rpki.prepdev.ripe.net
   environment:
-    name: "prepdev/${TARGET_HOST}"
-    url: "http://${TARGET_HOST}:8080/actuator/info"
+    name: prepdev
+    url: http://rsyncit-1.rpki.prepdev.ripe.net:8080/actuator/info
   allow_failure: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
