@@ -74,11 +74,11 @@ build:
   # Diagram of gradle tasks and their dependencies: https://docs.gradle.org/current/userguide/img/javaPluginTasks.png
   script:
     # build all classes, do not run tests or create jar.
-    - gradle clean testClasses
+    - gradle clean build testClasses
   # Cache the build artifacts in specific paths
   artifacts:
     paths:
-      - "build"
+      - build
     expire_in: 4 weeks
 
 test:
