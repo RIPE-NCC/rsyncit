@@ -74,7 +74,7 @@ build:
   # Diagram of gradle tasks and their dependencies: https://docs.gradle.org/current/userguide/img/javaPluginTasks.png
   script:
     # build all classes, do not run tests or create jar.
-    - gradle clean build testClasses
+    - gradle clean testClasses
   # Cache the build artifacts in specific paths
   artifacts:
     paths:
@@ -92,7 +92,6 @@ test:
     when: on_failure
     paths:
       - build/reports/
-      - build/libs/
     expire_in: 4 days
     reports:
       junit:
@@ -123,7 +122,7 @@ build:image:
   needs: ["test"]
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - gradle generateGitProperties
+    - gradle generateGitProperties build
     - cp build/libs/rsyncit-*.jar rsyncit.jar
     - docker build --build-arg JAR_FILE=rsyncit.jar --label org.label-schema.vcs-ref="$CI_COMMIT_SHORT_SHA" --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
     - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
