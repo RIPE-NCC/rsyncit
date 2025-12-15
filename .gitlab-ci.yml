@@ -92,6 +92,7 @@ test:
     when: on_failure
     paths:
       - build/reports/
+      - build/libs/
     expire_in: 4 days
     reports:
       junit:
