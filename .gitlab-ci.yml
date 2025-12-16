@@ -226,7 +226,7 @@ deploy:prepdev:
     TARGET_CONTAINER: rsyncit
     READINESS_URL: http://127.0.0.1:8080/actuator/info
     TARGET_TAG: prepdev
-    TARGET_HOST: rsyncit-*.rpki.prepdev.ripe.net
+    TARGET_HOST: rsyncit-1.rpki.prepdev.ripe.net
   environment:
     name: prepdev
     url: http://rsyncit-1.rpki.prepdev.ripe.net:8080/actuator/info
