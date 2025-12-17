@@ -229,20 +229,18 @@ deploy:prepdev:
   parallel:
     matrix:
       - TARGET_HOST: rsyncit-1.rpki.prepdev.ripe.net
-        PREPDEV_ENV: prepdev/rsyncit-1
-        PREPDEV_URL: http://rsyncit-1.rpki.prepdev.ripe.net:8080/actuator/info
+        RSYNCIT_URL: http://rsyncit-1.rpki.prepdev.ripe.net:8080/actuator/info
       - TARGET_HOST: rsyncit-2.rpki.prepdev.ripe.net
-        PREPDEV_ENV: prepdev/rsyncit-2
-        PREPDEV_URL: http://rsyncit-2.rpki.prepdev.ripe.net:8080/actuator/info
+        RSYNCIT_URL: http://rsyncit-2.rpki.prepdev.ripe.net:8080/actuator/info
   environment:
-    name: "$PREPDEV_ENV"
-    url: "$PREPDEV_URL"
+    name: prepdev
+    url: "$RSYNCIT_URL"
   allow_failure: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: manual
 
-deploy:production:
+deploy:production0old:
   <<: *salt-container-deploy
   needs: ["build:image"]
   variables:
@@ -257,3 +255,25 @@ deploy:production:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: never
+
+deploy:production:
+  <<: *salt-container-deploy
+  needs: ["build:image"]
+  variables:
+    IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    TARGET_CONTAINER: rsyncit
+    READINESS_URL: http://127.0.0.1:8080/actuator/info
+    TARGET_TAG: production
+  parallel:
+    matrix:
+      - TARGET_HOST: rsyncit-1.rpki.ripe.net
+        RSYNCIT_URL: http://rsyncit-1.rpki.ripe.net:8080/actuator/info
+      - TARGET_HOST: rsyncit-2.rpki.ripe.net
+        RSYNCIT_URL: http://rsyncit-2.rpki.ripe.net:8080/actuator/info
+  environment:
+    name: production
+    url: "$RSYNCIT_URL"
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
