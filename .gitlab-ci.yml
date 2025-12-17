@@ -240,22 +240,6 @@ deploy:prepdev:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: manual
 
-deploy:production0old:
-  <<: *salt-container-deploy
-  needs: ["build:image"]
-  variables:
-    IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
-    TARGET_CONTAINER: rsyncit
-    READINESS_URL: http://127.0.0.1:8080/actuator/info
-    TARGET_HOST: rsyncit-*.rpki.ripe.net
-    TARGET_TAG: production
-  environment:
-    name: production
-    url: http://rsyncit-1.rpki.ripe.net:8080/actuator/info
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - when: never
-
 deploy:production:
   <<: *salt-container-deploy
   needs: ["build:image"]
