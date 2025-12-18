@@ -21,6 +21,7 @@ include:
     file: /templates/security.yml
     inputs:
       stage: security
+      needs: ["lockfile"]
   - project: swe/gitlab-support
     file: /templates/container.yml
     inputs:
@@ -80,6 +81,17 @@ build:
     paths:
       - build
     expire_in: 4 weeks
+
+lockfile:
+  stage: build
+  cache:
+    <<: *global_cache
+    policy: pull-push
+  script:
+    - gradle dependencies --write-locks
+  artifacts:
+    paths:
+      - "gradle.lockfile"
 
 test:
   stage: test
