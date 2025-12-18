@@ -16,6 +16,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Component
@@ -26,6 +27,7 @@ public class SyncService {
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     @Autowired
     public SyncService(WebClient webClient,
@@ -38,6 +40,25 @@ public class SyncService {
     }
 
     public void sync() {
+        boolean shouldRun = true;
+        try {
+            shouldRun = isRunning.compareAndSet(false, true);
+            if (shouldRun) {
+                doSync();
+            } else {
+                log.info("Sync is already running, skipping this run. Most likely it means that the system is abnormally slow.");
+                metrics.tooSlow();
+            }
+        } finally {
+            if (shouldRun) {
+                // shouldRun is true by default to prevent the service to get stuck in the "running" state.
+                // So if this thread was interrupted before "compareAndSet", we reset it to "not running".
+                isRunning.set(false);
+            }
+        }
+    }
+
+    private void doSync() {
         var config = appConfig.getConfig();
         var rrdpFetcher = new RrdpFetcher(config, webClient, state, metrics);
 
@@ -46,7 +67,7 @@ public class SyncService {
         if (fetchResult instanceof RrdpFetcher.NoUpdates noUpdates) {
             metrics.success(noUpdates.serial());
             log.info("Session id {} and serial {} have not changed since the last check, nothing to update",
-                noUpdates.sessionId(), noUpdates.serial());
+                    noUpdates.sessionId(), noUpdates.serial());
         } else if (fetchResult instanceof RrdpFetcher.SuccessfulFetch success) {
             metrics.success(success.serial());
             log.info("Fetched {} objects in {}ms", success.objects().size(), t.getTime());

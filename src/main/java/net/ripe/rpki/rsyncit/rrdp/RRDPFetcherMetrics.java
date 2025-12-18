@@ -13,6 +13,7 @@ public final class RRDPFetcherMetrics {
     private final Counter failedUpdates;
     private final Counter timeoutUpdates;
     private final Counter objectFailures;
+    private final Counter tooSlow;
 
     public final Timer objectConstructionTimer;
 
@@ -20,14 +21,15 @@ public final class RRDPFetcherMetrics {
         successfulUpdates = buildCounter("success", meterRegistry);
         failedUpdates = buildCounter("failed", meterRegistry);
         timeoutUpdates = buildCounter("timeout", meterRegistry);
+        tooSlow = buildCounter("slow", meterRegistry);
         objectFailures = Counter.builder("rsyncit.fetcher.objects")
-            .description("Metrics on objects")
-            .tag("status", "failure")
-            .register(meterRegistry);
+                .description("Metrics on objects")
+                .tag("status", "failure")
+                .register(meterRegistry);
 
         Gauge.builder("rsyncit.fetcher.rrdp.serial", rrdpSerial::get)
-            .description("Serial of the RRDP notification.xml at the given URL")
-            .register(meterRegistry);
+                .description("Serial of the RRDP notification.xml at the given URL")
+                .register(meterRegistry);
 
         objectConstructionTimer = Timer.builder("rsyncit.fetcher.parsing")
                 .description("Time spent parsing objects for the last run")
@@ -47,15 +49,19 @@ public final class RRDPFetcherMetrics {
         this.timeoutUpdates.increment();
     }
 
+    public void tooSlow() {
+        this.tooSlow.increment();
+    }
+
     public void badObject() {
         this.objectFailures.increment();
     }
 
     private static Counter buildCounter(String statusTag, MeterRegistry registry) {
         return Counter.builder("rsyncit.fetcher.updated")
-            .description("Number of fetches")
-            .tag("status", statusTag)
-            .register(registry);
+                .description("Number of fetches")
+                .tag("status", statusTag)
+                .register(registry);
     }
 
 }
