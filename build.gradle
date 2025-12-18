@@ -41,6 +41,10 @@ java {
     }
 }
 
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 bootRun {
     systemProperties = System.properties
 }
