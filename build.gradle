@@ -41,6 +41,18 @@ java {
     }
 }
 
+configurations {
+    compileClasspath {
+        resolutionStrategy.activateDependencyLocking()
+    }
+    integrationImplementation.extendsFrom(testImplementation)
+    integrationRuntimeOnly.extendsFrom(testRuntimeOnly)
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 bootRun {
     systemProperties = System.properties
 }
