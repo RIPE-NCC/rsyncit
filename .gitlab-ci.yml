@@ -1,7 +1,6 @@
 stages:
   - build
   - package
-  - release
   - deploy
   - security
 
@@ -84,12 +83,12 @@ build:
 # All the package stages only require the test job, so whitesource scanning can
 # progress in parallel since this takes up to ten minutes.
 docker-image:
+  image: docker:29.1-cli
+  services:
+    - docker:29.1-dind
   stage: package
   needs: ["build"]
-  cache:
-    <<: *global_cache
   before_script:
-    - apt-get update &&  apt-get install --yes --no-install-recommends docker.io
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - cp build/libs/rsyncit-*.jar rsyncit.jar
@@ -97,10 +96,14 @@ docker-image:
     - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
 
 release:latest:
+  image: docker:29.1-cli
+  services:
+    - docker:29.1-dind
   stage: deploy
   needs: ["docker-image"]
-  script:
+  before_script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
     - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
     - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $CI_REGISTRY_IMAGE:latest
     - docker push $CI_REGISTRY_IMAGE:latest
