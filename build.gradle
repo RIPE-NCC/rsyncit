@@ -1,10 +1,10 @@
 plugins {
     id 'java'
-    id 'io.freefair.lombok' version '8.4'
-    id 'org.springframework.boot' version '3.1.5'
-    id 'com.gorylenko.gradle-git-properties' version '2.4.1'
+    id 'io.freefair.lombok' version '9.1.0'
+    id 'org.springframework.boot' version '3.5.3'
+    id 'com.gorylenko.gradle-git-properties' version '2.5.4'
     id 'org.sonarqube' version '3.5.0.2730'
-    id 'com.google.cloud.tools.jib' version '3.4.0'
+    id 'com.google.cloud.tools.jib' version '3.5.2'
 }
 
 apply plugin: 'java'
@@ -28,7 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
-    implementation 'com.google.guava:guava:32.0.0-jre'
+    implementation 'com.google.guava:guava:33.5.0-jre'
 
     implementation "net.ripe.rpki:rpki-commons:1.41"
 
