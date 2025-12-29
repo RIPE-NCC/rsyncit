@@ -22,7 +22,6 @@ include:
       stage: security
       name: rsyncit
       image: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
-      default_branch_image: "$CI_REGISTRY_IMAGE:latest"
       dockerfile: Dockerfile
       needs: ["docker-image"]
   - project: swe/gitlab-support
