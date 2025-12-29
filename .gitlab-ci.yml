@@ -1,7 +1,6 @@
 stages:
   - build
   - package
-  - release
   - deploy
   - security
 
