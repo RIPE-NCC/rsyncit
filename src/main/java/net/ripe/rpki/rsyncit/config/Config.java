@@ -14,6 +14,7 @@ public record Config(
     String cron,
     Duration requestTimeout,
     long targetDirectoryRetentionPeriodMs,
-    int targetDirectoryRetentionCopiesCount
+    int targetDirectoryRetentionCopiesCount,
+    Integer minimalObjectCount
 ) {
 }

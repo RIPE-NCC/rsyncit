@@ -28,6 +28,7 @@ public class AppConfig implements InfoContributor {
     private final ApplicationInfo info;
     private final long targetDirectoryRetentionPeriodMs;
     private final int targetDirectoryRetentionCopiesCount;
+    private final Integer minimalObjectCount;
 
     public AppConfig(@Value("${rrdpUrl}") String rrdpUrl,
                      @Value("${rrdpReplaceHost:}") String rrdpReplaceHostWith,
@@ -40,6 +41,7 @@ public class AppConfig implements InfoContributor {
                      @Value("${targetDirectoryRetentionPeriodMs:3600000}") long targetDirectoryRetentionPeriodMs,
                      // do not keep more than 8 copies of rsync directories at once
                      @Value("${targetDirectoryRetentionCopiesCount:8}") int targetDirectoryRetentionCopiesCount,
+                     @Value("${minimalObjectCount:#{null}}") Integer minimalObjectCount,
                      ApplicationInfo info,
                      MeterRegistry registry) {
         this.rrdpUrl = rrdpUrl;
@@ -50,6 +52,7 @@ public class AppConfig implements InfoContributor {
         this.info = info;
         this.targetDirectoryRetentionPeriodMs = targetDirectoryRetentionPeriodMs;
         this.targetDirectoryRetentionCopiesCount = targetDirectoryRetentionCopiesCount;
+        this.minimalObjectCount = minimalObjectCount;
 
         Gauge.builder("rsyncit.configuration", () -> 1.0)
                 .baseUnit("info")
@@ -58,6 +61,7 @@ public class AppConfig implements InfoContributor {
                 .tag("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()))
                 .tag("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()))
                 .tag("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount))
+                .tag("minimal_object_count", String.valueOf(minimalObjectCount))
                 .tag("build", info.gitCommitId())
                 .strongReference(true)
                 .register(registry);
@@ -65,7 +69,7 @@ public class AppConfig implements InfoContributor {
 
     public Config getConfig() {
         return new Config(rrdpUrl, substitutor(rrdpReplaceHostWith), rsyncPath, cron, requestTimeout,
-            targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount);
+            targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount, minimalObjectCount);
     }
 
     static Function<String, String> substitutor(String rrdpReplaceHostWith) {
