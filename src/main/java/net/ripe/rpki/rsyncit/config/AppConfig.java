@@ -77,7 +77,8 @@ public class AppConfig implements InfoContributor {
 
     public Config getConfig() {
         return new Config(rrdpUrl, substitutor(rrdpReplaceHostWith), rsyncPath, cron, requestTimeout,
-                targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount, minimalObjectCount);
+                targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount,
+                minimalObjectCount, minimalObjectCountCheckEnabled);
     }
 
     static Function<String, String> substitutor(String rrdpReplaceHostWith) {

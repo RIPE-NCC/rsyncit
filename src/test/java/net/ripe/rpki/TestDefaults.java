@@ -15,7 +15,7 @@ public class TestDefaults {
                 Paths.get("/tmp/rsync"),
             "0 0/10 * * * ?",
             Duration.of(1, ChronoUnit.MINUTES),
-            3600_000, 10, null);
+            3600_000, 10, 0, false);
     }
 
     public static WebClient defaultWebClient() {

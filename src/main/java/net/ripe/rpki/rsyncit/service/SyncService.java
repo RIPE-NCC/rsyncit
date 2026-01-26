@@ -59,11 +59,13 @@ public class SyncService {
     }
 
     private void onSuccess(RrdpFetcher.SuccessfulFetch success, Time.Timed<RrdpFetcher.FetchResult> t, Config config) {
-        if (success.objects().size() < config.minimalObjectCount()) {
-            log.error("Will not write objects to the rsync repository: the number of objects {} is smaller than the minimal threshold {}.",
-                    success.objects().size(), config.minimalObjectCount());
-            metrics.rejectAsTooSmall();
-            return;
+        if (config.minimalObjectCountCheckEnabled()) {
+            if (success.objects().size() < config.minimalObjectCount()) {
+                log.error("Will not write objects to the rsync repository: the number of objects {} is smaller than the minimal threshold {}.",
+                        success.objects().size(), config.minimalObjectCount());
+                metrics.rejectAsTooSmall();
+                return;
+            }
         }
         metrics.success(success.serial());
         log.info("Fetched {} objects in {}ms", success.objects().size(), t.getTime());

@@ -8,13 +8,14 @@ import java.util.function.Function;
 
 @With
 public record Config(
-    String rrdpUrl,
-    Function<String, String> substituteHost,
-    Path rsyncPath,
-    String cron,
-    Duration requestTimeout,
-    long targetDirectoryRetentionPeriodMs,
-    int targetDirectoryRetentionCopiesCount,
-    Integer minimalObjectCount
+        String rrdpUrl,
+        Function<String, String> substituteHost,
+        Path rsyncPath,
+        String cron,
+        Duration requestTimeout,
+        long targetDirectoryRetentionPeriodMs,
+        int targetDirectoryRetentionCopiesCount,
+        int minimalObjectCount,
+        boolean minimalObjectCountCheckEnabled
 ) {
 }
