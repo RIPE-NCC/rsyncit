@@ -11,11 +11,11 @@ import java.util.function.Function;
 public class TestDefaults {
     public static Config defaultConfig() {
         return new Config("https://rrdp.ripe.net/notification.xml",
-            Function.identity(),
+                Function.identity(),
                 Paths.get("/tmp/rsync"),
-            "0 0/10 * * * ?",
-            Duration.of(1, ChronoUnit.MINUTES),
-            3600_000, 10, 0, false);
+                "0 0/10 * * * ?",
+                Duration.of(1, ChronoUnit.MINUTES),
+                3600_000, 10, 0, false);
     }
 
     public static WebClient defaultWebClient() {
