@@ -2,7 +2,6 @@ package net.ripe.rpki.rsyncit.config;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.info.Info;
@@ -13,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Map;
+import java.util.HashMap;
 import java.util.function.Function;
 
 @Component
@@ -28,7 +27,8 @@ public class AppConfig implements InfoContributor {
     private final ApplicationInfo info;
     private final long targetDirectoryRetentionPeriodMs;
     private final int targetDirectoryRetentionCopiesCount;
-    private final Integer minimalObjectCount;
+    private final boolean minimalObjectCountCheckEnabled;
+    private final int minimalObjectCount;
 
     public AppConfig(@Value("${rrdpUrl}") String rrdpUrl,
                      @Value("${rrdpReplaceHost:}") String rrdpReplaceHostWith,
@@ -41,7 +41,8 @@ public class AppConfig implements InfoContributor {
                      @Value("${targetDirectoryRetentionPeriodMs:3600000}") long targetDirectoryRetentionPeriodMs,
                      // do not keep more than 8 copies of rsync directories at once
                      @Value("${targetDirectoryRetentionCopiesCount:8}") int targetDirectoryRetentionCopiesCount,
-                     @Value("${minimalObjectCount:#{null}}") Integer minimalObjectCount,
+                     @Value("${minimalObjectCountCheckEnabled:false}") boolean minimalObjectCountCheckEnabled,
+                     @Value("${minimalObjectCount:0}") int minimalObjectCount,
                      ApplicationInfo info,
                      MeterRegistry registry) {
         this.rrdpUrl = rrdpUrl;
@@ -53,23 +54,30 @@ public class AppConfig implements InfoContributor {
         this.targetDirectoryRetentionPeriodMs = targetDirectoryRetentionPeriodMs;
         this.targetDirectoryRetentionCopiesCount = targetDirectoryRetentionCopiesCount;
         this.minimalObjectCount = minimalObjectCount;
+        this.minimalObjectCountCheckEnabled = minimalObjectCountCheckEnabled;
 
-        Gauge.builder("rsyncit.configuration", () -> 1.0)
+        var builder = Gauge.builder("rsyncit.configuration", () -> 1.0)
                 .baseUnit("info")
                 .tag("rrdp_url", rrdpUrl)
                 .tag("rrdp_override_host", rrdpReplaceHostWith)
                 .tag("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()))
                 .tag("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()))
                 .tag("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount))
-                .tag("minimal_object_count", String.valueOf(minimalObjectCount))
-                .tag("build", info.gitCommitId())
-                .strongReference(true)
-                .register(registry);
+                .tag("build", info.gitCommitId());
+
+        if (minimalObjectCountCheckEnabled) {
+            if (minimalObjectCount <= 0) {
+                throw new IllegalArgumentException("minimalObjectCount must be > 0");
+            }
+            builder = builder.tag("minimal_object_count", String.valueOf(minimalObjectCount));
+        }
+
+        builder.strongReference(true).register(registry);
     }
 
     public Config getConfig() {
         return new Config(rrdpUrl, substitutor(rrdpReplaceHostWith), rsyncPath, cron, requestTimeout,
-            targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount, minimalObjectCount);
+                targetDirectoryRetentionPeriodMs, targetDirectoryRetentionCopiesCount, minimalObjectCount);
     }
 
     static Function<String, String> substitutor(String rrdpReplaceHostWith) {
@@ -87,17 +95,22 @@ public class AppConfig implements InfoContributor {
     public static ApplicationInfo appInfo(GitProperties gitProperties) {
         return new ApplicationInfo(gitProperties.getShortCommitId());
     }
+
     @Override
     public void contribute(Info.Builder builder) {
-        builder.withDetail("config", Map.of(
-            "cron", cron,
-            "rrdp_url", rrdpUrl,
-            "rrdp_replace_host", rrdpReplaceHostWith,
-            "rsync_path", rsyncPath,
-            "request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()),
-            "retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()),
-            "retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount),
-            "build", info.gitCommitId()
-        ));
+        var m = new HashMap<>();
+        m.put("cron", cron);
+        m.put("rrdp_url", rrdpUrl);
+        m.put("rrdp_replace_host", rrdpReplaceHostWith);
+        m.put("rsync_path", rsyncPath);
+        m.put("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()));
+        m.put("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()));
+        m.put("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount));
+        m.put("build", info.gitCommitId());
+        if (minimalObjectCountCheckEnabled) {
+            m.put("minimal_object_count_check_enabled", String.valueOf(minimalObjectCountCheckEnabled));
+            m.put("minimal_object_count", String.valueOf(minimalObjectCount));
+        }
+        builder.withDetail("config", m);
     }
 }
