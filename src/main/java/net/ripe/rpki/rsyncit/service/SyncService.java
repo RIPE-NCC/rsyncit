@@ -44,17 +44,13 @@ public class SyncService {
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
-        if (fetchResult instanceof RrdpFetcher.NoUpdates noUpdates) {
-            noUpdates(noUpdates);
-        } else if (fetchResult instanceof RrdpFetcher.SuccessfulFetch success) {
-            onSuccess(success, t, config);
-        } else if (fetchResult instanceof RrdpFetcher.FailedFetch failed) {
-            onFailure(failed);
-        } else if (fetchResult instanceof RrdpFetcher.Timeout) {
-            metrics.timeout();
-        } else {
-            // Should never happen?
-            log.error("Error, unknown fetch status");
+        switch (fetchResult) {
+            case RrdpFetcher.NoUpdates noUpdates -> noUpdates(noUpdates);
+            case RrdpFetcher.SuccessfulFetch success -> onSuccess(success, t, config);
+            case RrdpFetcher.FailedFetch failed -> onFailure(failed);
+            case RrdpFetcher.Timeout timeout -> metrics.timeout();
+            case null, default ->
+                throw new UnsupportedOperationException("Unknown fetch result: " + fetchResult);
         }
     }
 
