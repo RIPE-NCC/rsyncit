@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 
 @Component
@@ -99,19 +99,16 @@ public class AppConfig implements InfoContributor {
 
     @Override
     public void contribute(Info.Builder builder) {
-        var m = new HashMap<>();
-        m.put("cron", cron);
-        m.put("rrdp_url", rrdpUrl);
-        m.put("rrdp_replace_host", rrdpReplaceHostWith);
-        m.put("rsync_path", rsyncPath);
-        m.put("request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()));
-        m.put("retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()));
-        m.put("retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount));
-        m.put("build", info.gitCommitId());
-        if (minimalObjectCountCheckEnabled) {
-            m.put("minimal_object_count_check_enabled", String.valueOf(minimalObjectCountCheckEnabled));
-            m.put("minimal_object_count", String.valueOf(minimalObjectCount));
-        }
-        builder.withDetail("config", m);
+        builder.withDetail("config", Map.of(
+                "cron", cron,
+                "rrdp_url", rrdpUrl,
+                "rrdp_replace_host", rrdpReplaceHostWith,
+                "rsync_path", rsyncPath,
+                "request_timeout_seconds", String.valueOf(requestTimeout.toSeconds()),
+                "retention_period_minutes", String.valueOf(Duration.ofMillis(targetDirectoryRetentionPeriodMs).toMinutes()),
+                "retention_copies", String.valueOf(targetDirectoryRetentionCopiesCount),
+                "build", info.gitCommitId(),
+                "minimal_object_count_check_enabled", String.valueOf(minimalObjectCountCheckEnabled),
+                "minimal_object_count", minimalObjectCountCheckEnabled ? String.valueOf(minimalObjectCount) : "0"));
     }
 }
