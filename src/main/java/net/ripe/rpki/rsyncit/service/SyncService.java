@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.AppConfig;
+import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RRDPFetcherMetrics;
 import net.ripe.rpki.rsyncit.rrdp.RrdpFetcher;
 import net.ripe.rpki.rsyncit.rrdp.State;
@@ -43,40 +44,55 @@ public class SyncService {
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();
-        if (fetchResult instanceof RrdpFetcher.NoUpdates noUpdates) {
-            metrics.success(noUpdates.serial());
-            log.info("Session id {} and serial {} have not changed since the last check, nothing to update",
-                noUpdates.sessionId(), noUpdates.serial());
-        } else if (fetchResult instanceof RrdpFetcher.SuccessfulFetch success) {
-            metrics.success(success.serial());
-            log.info("Fetched {} objects in {}ms", success.objects().size(), t.getTime());
-            state.setRrdpState(new State.RrdpState(success.sessionId(), success.serial()));
-            log.info("Updated RRDP state to session_id {} and serial {}", success.sessionId(), success.serial());
-
-            var rsyncWriter = new RsyncWriter(config);
-            var r = Time.timed(() -> {
-                try {
-                    return rsyncWriter.writeObjects(success.objects(), Instant.now());
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            log.info("Wrote objects to {} in {}ms", r.getResult(), r.getTime());
-
-            state.getRrdpState().markInSync();
-
-            // Remove objects that were in old snapshots and didn't appear for a while
-            state.removeOldObject(Instant.now().minus(1, ChronoUnit.HOURS));
-        } else if (fetchResult instanceof RrdpFetcher.FailedFetch failed) {
-            metrics.failure();
-            log.error("Failed to fetch RRDP:", failed.exception());
-            state.setRrdpState(new State.RrdpState(failed.exception().getMessage()));
-        } else if (fetchResult instanceof RrdpFetcher.Timeout) {
-            metrics.timeout();
-        } else {
-            // Should never happen?
-            log.error("Error, unknown fetch status");
+        switch (fetchResult) {
+            case RrdpFetcher.NoUpdates noUpdates -> noUpdates(noUpdates);
+            case RrdpFetcher.SuccessfulFetch success -> onSuccess(success, t, config);
+            case RrdpFetcher.FailedFetch failed -> onFailure(failed);
+            case RrdpFetcher.Timeout timeout -> metrics.timeout();
+            case null, default ->
+                throw new UnsupportedOperationException("Unknown fetch result: " + fetchResult);
         }
     }
 
+    private void onSuccess(RrdpFetcher.SuccessfulFetch success, Time.Timed<RrdpFetcher.FetchResult> t, Config config) {
+        if (config.minimalObjectCountCheckEnabled()) {
+            if (success.objects().size() < config.minimalObjectCount()) {
+                log.error("Will not write objects to the rsync repository: the number of objects {} is smaller than the minimal threshold {}.",
+                        success.objects().size(), config.minimalObjectCount());
+                metrics.rejectAsTooSmall();
+                return;
+            }
+        }
+        metrics.success(success.serial());
+        log.info("Fetched {} objects in {}ms", success.objects().size(), t.getTime());
+        state.setRrdpState(new State.RrdpState(success.sessionId(), success.serial()));
+        log.info("Updated RRDP state to session_id {} and serial {}", success.sessionId(), success.serial());
+
+        var rsyncWriter = new RsyncWriter(config);
+        var r = Time.timed(() -> {
+            try {
+                return rsyncWriter.writeObjects(success.objects(), Instant.now());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
+        log.info("Wrote objects to {} in {}ms", r.getResult(), r.getTime());
+
+        state.getRrdpState().markInSync();
+
+        // Remove objects that were in old snapshots and didn't appear for a while
+        state.removeOldObject(Instant.now().minus(1, ChronoUnit.HOURS));
+    }
+
+    private void noUpdates(RrdpFetcher.NoUpdates noUpdates) {
+        metrics.success(noUpdates.serial());
+        log.info("Session id {} and serial {} have not changed since the last check, nothing to update",
+                noUpdates.sessionId(), noUpdates.serial());
+    }
+
+    private void onFailure(RrdpFetcher.FailedFetch failed) {
+        metrics.failure();
+        log.error("Failed to fetch RRDP:", failed.exception());
+        state.setRrdpState(new State.RrdpState(failed.exception().getMessage()));
+    }
 }

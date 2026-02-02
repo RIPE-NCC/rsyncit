@@ -12,6 +12,7 @@ public final class RRDPFetcherMetrics {
     private final Counter successfulUpdates;
     private final Counter failedUpdates;
     private final Counter timeoutUpdates;
+    private final Counter rejectedUpdates;
     private final Counter objectFailures;
 
     public final Timer objectConstructionTimer;
@@ -20,6 +21,7 @@ public final class RRDPFetcherMetrics {
         successfulUpdates = buildCounter("success", meterRegistry);
         failedUpdates = buildCounter("failed", meterRegistry);
         timeoutUpdates = buildCounter("timeout", meterRegistry);
+        rejectedUpdates = buildCounter("rejected", meterRegistry);
         objectFailures = Counter.builder("rsyncit.fetcher.objects")
             .description("Metrics on objects")
             .tag("status", "failure")
@@ -51,11 +53,14 @@ public final class RRDPFetcherMetrics {
         this.objectFailures.increment();
     }
 
+    public void rejectAsTooSmall() {
+        this.rejectedUpdates.increment();
+    }
+
     private static Counter buildCounter(String statusTag, MeterRegistry registry) {
         return Counter.builder("rsyncit.fetcher.updated")
             .description("Number of fetches")
             .tag("status", statusTag)
             .register(registry);
     }
-
 }
