@@ -1,9 +1,9 @@
-FROM eclipse-temurin:21-jdk-alpine
+FROM eclipse-temurin:25-jdk-alpine-3.23
 
 VOLUME /data
 VOLUME /conf
 
-RUN apk update && apk add --no-cache rsync
+RUN apk add --no-cache rsync
 
 ARG JAR_FILE
 COPY ${JAR_FILE} /rsyncit.jar
