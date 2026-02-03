@@ -131,7 +131,7 @@ class RrdpFetcherTest {
     }
 
     private RrdpFetcher.FetchResult tryFetch(String notificationXml, String snapshotXml) throws NotificationStructureException, XPathExpressionException, IOException, ParserConfigurationException, SAXException {
-        var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultWebClient(), new State(), new RRDPFetcherMetrics(new SimpleMeterRegistry()));
+        var fetcher = new RrdpFetcher(TestDefaults.defaultConfig(), TestDefaults.defaultHttpClient(), new State(), new RRDPFetcherMetrics(new SimpleMeterRegistry()));
         return fetcher.processNotificationXml(notificationXml.getBytes(StandardCharsets.UTF_8),
             url -> new RrdpFetcher.Downloaded(snapshotXml.getBytes(StandardCharsets.UTF_8), Optional.of(Instant.now())));
     }

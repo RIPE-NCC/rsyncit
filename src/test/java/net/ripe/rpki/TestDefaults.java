@@ -1,7 +1,7 @@
 package net.ripe.rpki;
 
 import net.ripe.rpki.rsyncit.config.Config;
-import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -18,7 +18,7 @@ public class TestDefaults {
                 3600_000, 10, 0, false);
     }
 
-    public static WebClient defaultWebClient() {
-        return WebClient.builder().build();
+    public static HttpClient defaultHttpClient() {
+        return HttpClient.create();
     }
 }

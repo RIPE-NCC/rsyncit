@@ -3,22 +3,17 @@ package net.ripe.rpki.rsyncit.rrdp;
 import com.google.common.hash.BloomFilter;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import net.ripe.rpki.commons.crypto.cms.RpkiSignedObjectParser;
 import net.ripe.rpki.commons.crypto.util.SignedObjectUtil;
-import net.ripe.rpki.commons.validation.ValidationResult;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.util.Sha256;
 import net.ripe.rpki.rsyncit.util.Time;
 import net.ripe.rpki.rsyncit.util.XML;
-import org.springframework.http.HttpRequest;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientRequestException;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
+import reactor.netty.http.client.HttpClient;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.ParserConfigurationException;
@@ -27,7 +22,6 @@ import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.math.BigInteger;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Duration;
@@ -37,6 +31,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -48,7 +43,7 @@ import java.util.stream.IntStream;
 public class RrdpFetcher {
 
     private final Config config;
-    private final WebClient httpClient;
+    private final HttpClient httpClient;
     private final State state;
     private final RRDPFetcherMetrics metrics;
 
@@ -63,7 +58,7 @@ public class RrdpFetcher {
     private final BloomFilter<String> loggedObjects = BloomFilter.create((from, into) -> into.putString(from, Charset.defaultCharset()), 100_000, 0.05);
 
 
-    public RrdpFetcher(Config config, WebClient httpClient, State state, RRDPFetcherMetrics metrics) {
+    public RrdpFetcher(Config config, HttpClient httpClient, State state, RRDPFetcherMetrics metrics) {
         this.config = config;
         this.httpClient = httpClient;
         this.state = state;
@@ -73,16 +68,24 @@ public class RrdpFetcher {
 
     private Downloaded download(String uri, Duration timeout) {
         var lastModified = new AtomicReference<Optional<Instant>>(Optional.empty());
-        var body = httpClient.get().uri(uri).retrieve()
-            .toEntity(byte[].class)
-            .doOnSuccess(e -> {
-                final long modified = e.getHeaders().getLastModified();
-                if (modified != -1) {
-                    lastModified.set(Optional.of(Instant.ofEpochMilli(modified)));
+        var body = httpClient
+            .responseTimeout(timeout)
+            .get()
+            .uri(uri)
+            .responseSingle((response, byteBufMono) -> {
+                String lastModifiedHeader = response.responseHeaders().get("Last-Modified");
+                if (lastModifiedHeader != null) {
+                    try {
+                        var parsed = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+                            .parse(lastModifiedHeader, Instant::from);
+                        lastModified.set(Optional.of(parsed));
+                    } catch (Exception e) {
+                        // Ignore parsing errors
+                    }
                 }
+                return byteBufMono.asByteArray();
             })
-            .block(timeout)
-            .getBody();
+            .block(timeout);
         return new Downloaded(body, lastModified.get());
     }
 
@@ -107,27 +110,24 @@ public class RrdpFetcher {
                  IOException |
                  NumberFormatException e) {
             return new FailedFetch(e);
+        } catch (io.netty.handler.timeout.ReadTimeoutException |
+                 io.netty.handler.timeout.WriteTimeoutException e) {
+            log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
+            return new Timeout();
         } catch (IllegalStateException e) {
-            if (e.getMessage().contains("Timeout")) {
+            if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
+                log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
+                return new Timeout();
+            }
+            if (e.getCause() instanceof TimeoutException) {
                 log.info("Timeout while loading RRDP repo: url={}", config.rrdpUrl());
                 return new Timeout();
             }
             return new FailedFetch(e);
-        } catch (WebClientResponseException e) {
-            var maybeRequest = Optional.ofNullable(e.getRequest());
-            // Can be either a HTTP non-2xx or a timeout
-            log.error("Web client error for {} {}: Can be HTTP non-200 or a timeout. For 2xx we assume it's a timeout.",
-                maybeRequest.map(HttpRequest::getMethod), maybeRequest.map(HttpRequest::getURI), e);
-            if (e.getStatusCode().is2xxSuccessful()) {
-                // Assume it's a timeout
-                return new Timeout();
-            }
+        } catch (Exception e) {
+            // Handle other runtime exceptions including PrematureCloseException
+            log.error("Error fetching RRDP repo: url={}", config.rrdpUrl(), e);
             return new FailedFetch(e);
-        } catch (WebClientRequestException e) {
-            // TODO: Exception handling could be a lot nicer. However we are mixing reactive and synchronous code,
-            //  and a nice solution probably requires major changes.
-            log.error("Web client request exception, only known cause is a timeout.", e);
-            return new Timeout();
         }
     }
 

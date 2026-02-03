@@ -10,37 +10,33 @@ import net.ripe.rpki.rsyncit.rrdp.RrdpFetcher;
 import net.ripe.rpki.rsyncit.rrdp.State;
 import net.ripe.rpki.rsyncit.rsync.RsyncWriter;
 import net.ripe.rpki.rsyncit.util.Time;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 @Slf4j
-@Component
 @Getter
 public class SyncService {
 
-    private final WebClient webClient;
+    private final HttpClient httpClient;
     private final AppConfig appConfig;
     private final State state;
     private final RRDPFetcherMetrics metrics;
 
-    @Autowired
-    public SyncService(WebClient webClient,
+    public SyncService(HttpClient httpClient,
                        AppConfig appConfig,
                        MeterRegistry meterRegistry) {
         this.appConfig = appConfig;
-        this.webClient = webClient;
+        this.httpClient = httpClient;
         this.metrics = new RRDPFetcherMetrics(meterRegistry);
         this.state = new State();
     }
 
     public void sync() {
         var config = appConfig.getConfig();
-        var rrdpFetcher = new RrdpFetcher(config, webClient, state, metrics);
+        var rrdpFetcher = new RrdpFetcher(config, httpClient, state, metrics);
 
         var t = Time.timed(rrdpFetcher::fetchObjects);
         final RrdpFetcher.FetchResult fetchResult = t.getResult();

@@ -4,14 +4,16 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
-import org.apache.tomcat.util.http.fileupload.FileUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -150,7 +152,7 @@ public class RsyncWriter {
             return targetDirectory;
         } finally {
             try {
-                FileUtils.deleteDirectory(temporaryDirectory.toFile());
+                deleteDirectory(temporaryDirectory);
             } catch (IOException ignored) {
             }
         }
@@ -224,7 +226,7 @@ public class RsyncWriter {
             fileWriterPool.submit(() -> oldDirectoriesToDelete.parallel().forEach(directory -> {
                 log.info("Removing old publication directory {}", directory);
                 try {
-                    FileUtils.deleteDirectory(directory.toFile());
+                    deleteDirectory(directory);
                 } catch (IOException e) {
                     log.warn("Removing old publication directory {} failed", directory, e);
                 }
@@ -245,5 +247,27 @@ public class RsyncWriter {
             return path.substring(1);
         }
         return path;
+    }
+
+    /**
+     * Recursively delete a directory and all its contents.
+     */
+    private static void deleteDirectory(Path directory) throws IOException {
+        if (!Files.exists(directory)) {
+            return;
+        }
+        Files.walkFileTree(directory, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 }

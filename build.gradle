@@ -1,17 +1,20 @@
 plugins {
     id 'java'
     id 'io.freefair.lombok' version '9.1.0'
-    id 'org.springframework.boot' version '3.5.9'
     id 'com.gorylenko.gradle-git-properties' version '2.5.4'
     id 'org.sonarqube' version '3.5.0.2730'
     id 'com.google.cloud.tools.jib' version '3.5.2'
+    id 'application'
 }
 
 apply plugin: 'java'
-apply plugin: 'io.spring.dependency-management'
 
 group = 'net.ripe.rpki'
 version = '0.5.0-SNAPSHOT'
+
+application {
+    mainClass = 'net.ripe.rpki.rsyncit.RsyncitApplication'
+}
 
 repositories {
     mavenCentral()
@@ -21,18 +24,34 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-webflux'
-    implementation 'org.springframework.boot:spring-boot-starter-quartz'
+    // Lightweight HTTP server
+    implementation 'io.javalin:javalin:6.5.0'
+
+    // Reactor Netty for HTTP client (standalone, without Spring)
+    implementation 'io.projectreactor.netty:reactor-netty-http:1.2.5'
+
+    // Jackson for JSON serialization
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.3'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.3'
+
     // Metrics
-    implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'io.micrometer:micrometer-core:1.15.0'
+    implementation 'io.micrometer:micrometer-registry-prometheus:1.15.0'
+
+    // Cron scheduler
+    implementation 'org.quartz-scheduler:quartz:2.5.0'
 
     implementation 'com.google.guava:guava:33.5.0-jre'
 
     implementation "net.ripe.rpki:rpki-commons:1.41"
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.17'
+    implementation 'ch.qos.logback:logback-classic:1.5.18'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.1'
+    testImplementation 'org.assertj:assertj-core:3.27.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 java {
@@ -45,23 +64,23 @@ configurations {
     compileClasspath {
         resolutionStrategy.activateDependencyLocking()
     }
-    integrationImplementation.extendsFrom(testImplementation)
-    integrationRuntimeOnly.extendsFrom(testRuntimeOnly)
 }
 
 dependencyLocking {
     lockAllConfigurations()
 }
 
-bootRun {
-    systemProperties = System.properties
-}
-
 tasks.named('test') {
     useJUnitPlatform()
 }
 
-// Do not build *-plain.jar
+// Create a fat jar with all dependencies
 jar {
-    enabled = false
+    manifest {
+        attributes 'Main-Class': 'net.ripe.rpki.rsyncit.RsyncitApplication'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
