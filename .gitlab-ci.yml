@@ -110,7 +110,6 @@ release:latest:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: never
 
-
 sonarqube-analysis:
   stage: build
   needs: ["build"]
