@@ -41,7 +41,7 @@ variables:
   TERM: dumb
 
 default:
-  image: gradle:9.4.1-jdk25
+  image: gradle:9.4.1-jdk25@sha256:c81867d40732e0d1af0bbce85eae6c61d326320cacec2d1bbf011d68ace184a8
 
 # Cache per repository (not shared between forks?).
 cache: &global_cache
@@ -82,9 +82,9 @@ build:
 # All the package stages only require the test job, so whitesource scanning can
 # progress in parallel since this takes up to ten minutes.
 docker-image:
-  image: docker:29.3-cli
+  image: docker:29.3-cli@sha256:70303ed0d265aee7bf4be0ddffe20b0b6e4f69ffa125e2a20cbb3718b99688db
   services:
-    - docker:29.3-dind
+    - docker:29.3-dind@sha256:4d90f1f6c400315c2dba96d3ec93c01e64198395cbba04f79d12adce4f737029
   stage: package
   needs: ["build"]
   before_script:
@@ -95,9 +95,9 @@ docker-image:
     - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
 
 release:latest:
-  image: docker:29.3-cli
+  image: docker:29.3-cli@sha256:70303ed0d265aee7bf4be0ddffe20b0b6e4f69ffa125e2a20cbb3718b99688db
   services:
-    - docker:29.3-dind
+    - docker:29.3-dind@sha256:4d90f1f6c400315c2dba96d3ec93c01e64198395cbba04f79d12adce4f737029
   stage: deploy
   needs: ["docker-image"]
   before_script:
@@ -133,7 +133,7 @@ release:latest:
 # - TARGET_TAG: tag used on the target host
 #
 .salt-container-deploy: &salt-container-deploy
-  image: docker-registry.ripe.net/swe/gitlab-ci/debian-deployenv
+  image: docker-registry.ripe.net/swe/gitlab-ci/debian-deployenv@sha256:2fef3c25353435b332b106d0ec28d0e46d38ff1fb24de70c19d6c7f1beb59f8f
   stage: deploy
   script:
     - if [ -z "${TARGET_CONTAINER}" ]; then echo "set TARGET_CONTAINER"; exit 2; fi
