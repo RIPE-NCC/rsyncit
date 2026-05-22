@@ -82,7 +82,7 @@ build:
 # All the package stages only require the test job, so whitesource scanning can
 # progress in parallel since this takes up to ten minutes.
 docker-image:
-  image: docker:29.5-cli@sha256:b40b3737eb3bf588d25bb856d3564dd3f9fdb32ac2fc19ebe85cc58d761692a5
+  image: docker:29.5-cli@sha256:9ba8e32bfc35a2c7ae2feb1e3241b2778ae21dee80f4dcd31d04e1cfdea86ea2
   services:
     - docker:29.5-dind@sha256:eed377f3ce14afda560e742c5b3ae446df1ce00a16e1beab2ac6c78c1477fe85
   stage: package
@@ -95,7 +95,7 @@ docker-image:
     - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
 
 release:latest:
-  image: docker:29.5-cli@sha256:b40b3737eb3bf588d25bb856d3564dd3f9fdb32ac2fc19ebe85cc58d761692a5
+  image: docker:29.5-cli@sha256:9ba8e32bfc35a2c7ae2feb1e3241b2778ae21dee80f4dcd31d04e1cfdea86ea2
   services:
     - docker:29.5-dind@sha256:eed377f3ce14afda560e742c5b3ae446df1ce00a16e1beab2ac6c78c1477fe85
   stage: deploy
