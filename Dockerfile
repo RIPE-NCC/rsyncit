@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jdk-alpine-3.23@sha256:30d9f87d702c2c1c601ed0d31e0c88ea1ea474ee7676cda7b7a59e759181c4dd
+FROM eclipse-temurin:25-jdk-alpine-3.23@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151
 
 VOLUME /data
 VOLUME /conf
