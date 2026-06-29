@@ -32,7 +32,7 @@ dependencies {
 
     implementation 'com.google.guava:guava:33.6.0-jre'
 
-    implementation "net.ripe.rpki:rpki-commons:1.41"
+    implementation "net.ripe.rpki:rpki-commons:2.0"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
