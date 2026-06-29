@@ -1,7 +1,7 @@
 plugins {
     id 'java'
     id 'io.freefair.lombok' version '9.5.0'
-    id 'org.springframework.boot' version '3.5.15'
+    id 'org.springframework.boot' version '3.5.16'
     id 'com.gorylenko.gradle-git-properties' version '4.0.1'
     id 'org.sonarqube' version '7.3.1.8318'
     id 'com.google.cloud.tools.jib' version '3.5.3'
