@@ -41,7 +41,7 @@ variables:
   TERM: dumb
 
 default:
-  image: gradle:9.6.1-jdk25@sha256:e8aeffb8197b17151ce24607811f60e91125f0018f7a3b08dc504ba9168a9c4f
+  image: gradle:9.7.1-jdk25@sha256:22b9fd4a079e36b5cf0dd14c62bc8e5606eb70733ff47d82375ebf5e35e494e6
 
 # Cache per repository (not shared between forks?).
 cache: &global_cache
