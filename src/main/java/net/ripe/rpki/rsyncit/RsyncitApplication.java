@@ -2,7 +2,6 @@ package net.ripe.rpki.rsyncit;
 
 import io.micrometer.common.KeyValues;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
 import io.netty.resolver.ResolvedAddressTypes;
