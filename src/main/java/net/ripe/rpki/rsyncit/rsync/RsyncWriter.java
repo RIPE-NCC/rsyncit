@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
+import net.ripe.rpki.rsyncit.rsync.RsyncWriter.ObjectTarget;
+
 import org.apache.tomcat.util.http.fileupload.FileUtils;
 import org.jspecify.annotations.NonNull;
 
@@ -154,17 +156,15 @@ public class RsyncWriter {
                     // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
                     // writing data outside the controlled path.
                     var targetPath = resolveObjectPath(hostDirectory, object.url());
-                    if (isWithin(targetPath, hostDirectory)) {
-                        return Stream.of(object);
+                    if (targetPath.isPresent()) {
+                        var target = new ObjectTarget(targetPath.get(), object.bytes(), FileTime.from(object.modificationTime()));
+                        return Stream.of(target);
                     } else {
                         log.error("The object with url {} was skipped.", object.url());
                     }
                     return Stream.empty();
                 })
-                .map(rpkiObject -> {
-                    var targetPath = resolveObjectPath(hostDirectory, rpkiObject.url());
-                    return new ObjectTarget(targetPath, rpkiObject.bytes(), FileTime.from(rpkiObject.modificationTime()));
-                }).toList();
+                .toList();
     }
 
     static Path generatePublicationDirectoryPath(Path baseDir, Instant now) {
@@ -173,15 +173,13 @@ public class RsyncWriter {
         return baseDir.resolve("published-" + timeSegment);
     }
 
-    static Path resolveObjectPath(Path hostBasedPath, URI url) {
-        return hostBasedPath.resolve(relativePath(url.getPath())).normalize();
-    }
-
-    // Check that `path` is strictly below `directory`    
-    private static boolean isWithin(Path path, Path directory) {
-        var normalizedDirectory = directory.normalize();
-        var normalizedPath = path.normalize();
-        return normalizedPath.startsWith(normalizedDirectory) && !normalizedPath.equals(normalizedDirectory);
+    static Optional<Path> resolveObjectPath(Path hostDirectory, URI url) {
+        var targetPath = hostDirectory.resolve(relativePath(url.getPath())).normalize();
+        var normalizedDirectory = hostDirectory.normalize();
+        if (targetPath.startsWith(normalizedDirectory) && !targetPath.equals(normalizedDirectory)) {
+            return Optional.of(targetPath);
+        }
+        return Optional.empty();
     }
 
     private void atomicallyReplacePublishedSymlink(Path baseDirectory, Path targetDirectory) throws IOException {

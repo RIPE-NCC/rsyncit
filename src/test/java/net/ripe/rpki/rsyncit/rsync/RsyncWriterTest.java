@@ -18,6 +18,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -193,16 +194,16 @@ class RsyncWriterTest {
         var hostDirectory = tmpPath.resolve("bla.net");
         assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
                 URI.create("rsync://bla.net/path1/a.cer")))
-                .isEqualTo(hostDirectory.resolve("path1/a.cer"));
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
         assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
                 URI.create("rsync://bla.net:873/path1/a.cer")))
-                .isEqualTo(hostDirectory.resolve("path1/a.cer"));
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
         assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
                 URI.create("rsync://user@bla.net/path1/a.cer")))
-                .isEqualTo(hostDirectory.resolve("path1/a.cer"));
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
         assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
                 URI.create("rsync://bla.net:873/etc/target")))
-                .isEqualTo(hostDirectory.resolve("etc/target"));
+                .isEqualTo(Optional.of(hostDirectory.resolve("etc/target")));
     }
 
     static Path writeSomeObjects(RsyncWriter writer, Instant then) throws IOException {
