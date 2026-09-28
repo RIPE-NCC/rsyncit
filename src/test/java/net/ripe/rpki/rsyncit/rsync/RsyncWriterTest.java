@@ -17,6 +17,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -117,6 +119,98 @@ class RsyncWriterTest {
             assertThat(root.resolve( "published/PATH_INJECTION.txt").toFile().exists()).isFalse();
             checkFile(root.resolve( "published/bla.net/path1/NOT_REALLY_PATH_INJECTION.txt"), o3.bytes());
         });
+    }
+
+    @Test
+    public void testIgnoreUrlWithPortInAuthority(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
+            var root = rsyncWriter.getConfig().rsyncPath();
+            // An absolute path in a URL whose authority carries a port used to escape the
+            // publication directory entirely: the target was derived by relativizing against
+            // "rsync://bla.net", which leaves the URL untouched when the authority differs.
+            var escaped = root.resolve("ESCAPED_VIA_PORT.txt");
+            var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
+            var o2 = new RpkiObject(URI.create("rsync://bla.net:873" + escaped), someBytes(), Instant.now());
+
+            rsyncWriter.writeObjects(Arrays.asList(o1, o2), Instant.now());
+
+            assertThat(escaped.toFile().exists()).isFalse();
+            checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
+            // the object itself is still published, but underneath the host directory
+            checkFile(root.resolve("published/bla.net").resolve(escaped.toString().substring(1)), o2.bytes());
+        });
+    }
+
+    @Test
+    public void testIgnoreUrlWithUserInfoInAuthority(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
+            var root = rsyncWriter.getConfig().rsyncPath();
+            var escaped = root.resolve("ESCAPED_VIA_USERINFO.txt");
+            var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
+            var o2 = new RpkiObject(URI.create("rsync://user@bla.net" + escaped), someBytes(), Instant.now());
+
+            rsyncWriter.writeObjects(Arrays.asList(o1, o2), Instant.now());
+
+            assertThat(escaped.toFile().exists()).isFalse();
+            checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
+            checkFile(root.resolve("published/bla.net").resolve(escaped.toString().substring(1)), o2.bytes());
+        });
+    }
+
+    @Test
+    public void testIgnoreUrlEscapingIntoSiblingOfHostDirectory(@TempDir Path tmpPath) throws Exception {
+        withRsyncWriter(tmpPath, rsyncWriter -> {
+            var o1 = new RpkiObject(URI.create("rsync://bla.net/path1/a.cer"), someBytes(), Instant.now());
+            // "bla.net.evil" has "bla.net" as a string prefix, but is not below the host directory
+            var o2 = new RpkiObject(URI.create("rsync://bla.net/../bla.net.evil/SIBLING_INJECTION.txt"), someBytes(), Instant.now());
+
+            var targetDir = rsyncWriter.writeObjects(Arrays.asList(o1, o2), Instant.now());
+
+            var root = rsyncWriter.getConfig().rsyncPath();
+            checkFile(root.resolve("published/bla.net/path1/a.cer"), o1.bytes());
+            assertThat(targetDir.resolve("bla.net.evil").toFile().exists()).isFalse();
+        });
+    }
+
+    @Test
+    public void testFilterOutBadUrlsRejectsPathsOutsideHostDirectory(@TempDir Path tmpPath) {
+        var hostDirectory = tmpPath.resolve("bla.net");
+        Function<String, Boolean> accepted = url -> !RsyncWriter.writableObjects(hostDirectory,
+                List.of(new RpkiObject(URI.create(url), someBytes(), Instant.now()))).isEmpty();
+
+        assertThat(accepted.apply("rsync://bla.net/path1/a.cer")).isTrue();
+        assertThat(accepted.apply("rsync://bla.net/path1/path2/../b.cer")).isTrue();
+
+        assertThat(accepted.apply("rsync://bla.net:873/etc/target")).isTrue();
+        assertThat(accepted.apply("rsync://user@bla.net/etc/target")).isTrue();
+        assertThat(accepted.apply("rsync://bla.net/../../PATH_INJECTION.txt")).isFalse();
+        assertThat(accepted.apply("rsync://bla.net/../bla.net.evil/x.cer")).isFalse();
+        // resolves to the host directory itself, which would be written as a file
+        assertThat(accepted.apply("rsync://bla.net")).isFalse();
+    }
+
+    @Test
+    public void testResolveObjectPathStaysBelowHostDirectory(@TempDir Path tmpPath) {
+        var hostDirectory = tmpPath.resolve("bla.net");
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net/path1/a.cer")))
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net:873/path1/a.cer")))
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://user@bla.net/path1/a.cer")))
+                .isEqualTo(Optional.of(hostDirectory.resolve("path1/a.cer")));
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net:873/etc/target")))
+                .isEqualTo(Optional.of(hostDirectory.resolve("etc/target")));
+
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net/../etc/resolve.conf")))
+                .isEqualTo(Optional.empty());                
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net:873/../../../etc/resolve.conf")))
+                .isEqualTo(Optional.empty());                                
     }
 
     static Path writeSomeObjects(RsyncWriter writer, Instant then) throws IOException {

@@ -4,14 +4,16 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.ripe.rpki.rsyncit.config.Config;
 import net.ripe.rpki.rsyncit.rrdp.RpkiObject;
+import net.ripe.rpki.rsyncit.rsync.RsyncWriter.ObjectTarget;
+
 import org.apache.tomcat.util.http.fileupload.FileUtils;
+import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -76,18 +78,9 @@ public class RsyncWriter {
             groupedByHost.forEach((hostName, os) -> {
                 // create a directory per hostname (in realistic cases there will be just one)
                 var hostDirectory = temporaryDirectory.resolve(hostName);
-                var hostUrl = URI.create("rsync://" + hostName);
 
                 // Gather the relative paths of files with legal names
-                var writableContent = filterOutBadUrls(hostDirectory, os).stream()
-                        .map(rpkiObject -> {
-                            var relativeUriPath = hostUrl.relativize(rpkiObject.url()).getPath();
-                            var targetPath = hostDirectory.resolve(relativeUriPath).normalize();
-
-                            assert targetPath.normalize().startsWith(hostDirectory.normalize());
-
-                            return new ObjectTarget(targetPath, rpkiObject.bytes(), FileTime.from(rpkiObject.modificationTime()));
-                        }).toList();
+                var writableContent = writableObjects(hostDirectory, os);
 
                 // Create directories
                 // Since createDirectories is idempotent, we do not worry about the order in which it is actually
@@ -156,27 +149,37 @@ public class RsyncWriter {
         }
     }
 
+    static @NonNull List<ObjectTarget> writableObjects(Path hostDirectory, Collection<RpkiObject> os) {
+        return os.stream()
+                .flatMap(object -> {
+                    // Check that the resulting path of the object stays within `hostBasedPath`
+                    // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
+                    // writing data outside the controlled path.
+                    var targetPath = resolveObjectPath(hostDirectory, object.url());
+                    if (targetPath.isPresent()) {
+                        var target = new ObjectTarget(targetPath.get(), object.bytes(), FileTime.from(object.modificationTime()));
+                        return Stream.of(target);
+                    } else {
+                        log.error("The object with url {} was skipped.", object.url());
+                    }
+                    return Stream.empty();
+                })
+                .toList();
+    }
+
     static Path generatePublicationDirectoryPath(Path baseDir, Instant now) {
         var timeSegment = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.of("UTC")).format(now);
 
         return baseDir.resolve("published-" + timeSegment);
     }
 
-    static List<RpkiObject> filterOutBadUrls(Path hostBasedPath, Collection<RpkiObject> objects) {
-        final String normalizedHostPath = hostBasedPath.normalize().toString();
-        return objects.stream().flatMap(object -> {
-            var objectRelativePath = Paths.get(relativePath(object.url().getPath()));
-            // Check that the resulting path of the object stays within `hostBasedPath`
-            // to prevent URLs like rsync://bla.net/path/../../../../../PATH_INJECTION.txt
-            // writing data outside the controlled path.
-            final String normalizedPath = hostBasedPath.resolve(objectRelativePath).normalize().toString();
-            if (normalizedPath.startsWith(normalizedHostPath)) {
-                return Stream.of(object);
-            } else {
-                log.error("The object with url {} was skipped.", object.url());
-            }
-            return Stream.empty();
-        }).collect(Collectors.toList());
+    static Optional<Path> resolveObjectPath(Path hostDirectory, URI url) {
+        var targetPath = hostDirectory.resolve(relativePath(url.getPath())).normalize();
+        var normalizedDirectory = hostDirectory.normalize();
+        if (targetPath.startsWith(normalizedDirectory) && !targetPath.equals(normalizedDirectory)) {
+            return Optional.of(targetPath);
+        }
+        return Optional.empty();
     }
 
     private void atomicallyReplacePublishedSymlink(Path baseDirectory, Path targetDirectory) throws IOException {
