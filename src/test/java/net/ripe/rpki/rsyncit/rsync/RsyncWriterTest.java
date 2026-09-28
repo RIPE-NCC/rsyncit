@@ -204,6 +204,13 @@ class RsyncWriterTest {
         assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
                 URI.create("rsync://bla.net:873/etc/target")))
                 .isEqualTo(Optional.of(hostDirectory.resolve("etc/target")));
+
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net/../etc/resolve.conf")))
+                .isEqualTo(Optional.empty());                
+        assertThat(RsyncWriter.resolveObjectPath(hostDirectory,
+                URI.create("rsync://bla.net:873/../../../etc/resolve.conf")))
+                .isEqualTo(Optional.empty());                                
     }
 
     static Path writeSomeObjects(RsyncWriter writer, Instant then) throws IOException {
